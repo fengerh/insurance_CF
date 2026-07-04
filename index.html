@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>保单管理工具 v20260704.0600</title>
+<title>保单管理工具 v20260704.0910</title>
 <style>
   /* 所有样式保持不变，仅调整布局相关 */
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -911,6 +911,23 @@
     background: #4f46e5;
     border-radius: 2px;
   }
+  /* 万能账户区块折叠 */
+  .ua-section-title {
+    cursor: pointer;
+    user-select: none;
+  }
+  .ua-section-title::after {
+    content: ' ▲';
+    font-size: 11px;
+    color: #9ca3af;
+    margin-left: auto;
+  }
+  .ua-section.collapsed .ua-section-title::after {
+    content: ' ▼';
+  }
+  .ua-section.collapsed .ua-section-body {
+    display: none !important;
+  }
   .ua-row {
     display: flex;
     gap: 12px;
@@ -1402,136 +1419,144 @@
         <div id="uaContent" style="display:none;">
 
           <!-- 区块1: 基本参数 -->
-          <div class="ua-section">
-            <div class="ua-section-title">📊 基本参数</div>
-            <div class="ua-row">
-              <div class="form-group">
-                <label>最低保证利率（年化%）</label>
-                <input type="number" id="uaMinRate" placeholder="如 2.5" min="0" max="20" step="0.01" onchange="handleUAFieldChange()">
-              </div>
-              <div class="form-group">
-                <label>进入账户比例（%）</label>
-                <input type="number" id="uaEntryRate" placeholder="如 95" min="0" max="100" step="0.01" onchange="handleUAFieldChange()">
-              </div>
-              <div class="form-group">
-                <label>账户管理费（元/月）</label>
-                <input type="number" id="uaMgmtFee" placeholder="0" min="0" step="0.01" onchange="handleUAFieldChange()">
-              </div>
-              <div class="form-group">
-                <label>演示利率选择</label>
-                <select id="uaDemoRateMode" onchange="handleUAFieldChange()">
-                  <option value="settled">按结算利率</option>
-                  <option value="min">按最低保证利率</option>
-                </select>
+          <div class="ua-section collapsed">
+            <div class="ua-section-title" onclick="toggleUASection(this)">📊 基本参数</div>
+            <div class="ua-section-body">
+              <div class="ua-row">
+                <div class="form-group">
+                  <label>最低保证利率（年化%）</label>
+                  <input type="number" id="uaMinRate" placeholder="如 2.5" min="0" max="20" step="0.01" onchange="handleUAFieldChange()">
+                </div>
+                <div class="form-group">
+                  <label>进入账户比例（%）</label>
+                  <input type="number" id="uaEntryRate" placeholder="如 95" min="0" max="100" step="0.01" onchange="handleUAFieldChange()">
+                </div>
+                <div class="form-group">
+                  <label>账户管理费（元/月）</label>
+                  <input type="number" id="uaMgmtFee" placeholder="0" min="0" step="0.01" onchange="handleUAFieldChange()">
+                </div>
+                <div class="form-group">
+                  <label>演示利率选择</label>
+                  <select id="uaDemoRateMode" onchange="handleUAFieldChange()">
+                    <option value="settled">按结算利率</option>
+                    <option value="min">按最低保证利率</option>
+                  </select>
+                </div>
               </div>
             </div>
           </div>
 
           <!-- 区块2: 退保/领取手续费 -->
-          <div class="ua-section">
-            <div class="ua-section-title">📋 退保和部分领取手续费（按保单年度递减）</div>
-            <div class="ua-row">
-              <div class="form-group">
-                <label>手续费率（按年度，逗号分隔，如 5,4,3,2,1,0）</label>
-                <input type="text" id="uaWithdrawFeeRates" placeholder="5,4,3,2,1,0" style="flex:3; min-width:280px;" onchange="handleUAFieldChange()">
+          <div class="ua-section collapsed">
+            <div class="ua-section-title" onclick="toggleUASection(this)">📋 退保和部分领取手续费（按保单年度递减）</div>
+            <div class="ua-section-body">
+              <div class="ua-row">
+                <div class="form-group">
+                  <label>手续费率（按年度，逗号分隔，如 5,4,3,2,1,0）</label>
+                  <input type="text" id="uaWithdrawFeeRates" placeholder="5,4,3,2,1,0" style="flex:3; min-width:280px;" onchange="handleUAFieldChange()">
+                </div>
+                <div class="form-group" style="max-width:180px;">
+                  <label>领取手续费返还</label>
+                  <select id="uaWithdrawFeeReturnType">
+                    <option value="none">不返还</option>
+                    <option value="afterN">满N年返还</option>
+                  </select>
+                </div>
               </div>
-              <div class="form-group" style="max-width:180px;">
-                <label>领取手续费返还</label>
-                <select id="uaWithdrawFeeReturnType">
-                  <option value="none">不返还</option>
-                  <option value="afterN">满N年返还</option>
-                </select>
+              <div style="font-size:11px;color:#6b7280;margin-top:4px;">
+                表示第1年赎回扣5%、第2年扣4%...第N年之后不再扣除。<br>
+                在现金价值表中显示时，会按此费率扣除手续费后展示"净账户价值"。
               </div>
-            </div>
-            <div style="font-size:11px;color:#6b7280;margin-top:4px;">
-              表示第1年赎回扣5%、第2年扣4%...第N年之后不再扣除。<br>
-              在现金价值表中显示时，会按此费率扣除手续费后展示"净账户价值"。
             </div>
           </div>
 
           <!-- 区块3: 有效保险金额给付系数 -->
-          <div class="ua-section" id="uaCoefficientSection" style="display:none;">
-            <div class="ua-section-title">📊 有效保险金额给付系数</div>
-            <div style="font-size:12px; color:#6b7280; margin-bottom:8px;">
-              到达年龄 = 投保年龄 + 保单年度 - 1。有效保险金额 = Max(账户价值, 基本保险金额 × 给付系数)。
-              风险保险金额 = 有效保险金额 - 账户价值（即风险净额）。
+          <div class="ua-section collapsed" id="uaCoefficientSection" style="display:none;">
+            <div class="ua-section-title" onclick="toggleUASection(this)">📊 有效保险金额给付系数</div>
+            <div class="ua-section-body">
+              <div style="font-size:12px; color:#6b7280; margin-bottom:8px;">
+                到达年龄 = 投保年龄 + 保单年度 - 1。有效保险金额 = Max(账户价值, 基本保险金额 × 给付系数)。
+                风险保险金额 = 有效保险金额 - 账户价值（即风险净额）。
+              </div>
+              <table class="ua-table">
+                <thead>
+                  <tr>
+                    <th style="width:25%;">起始到达年龄</th>
+                    <th style="width:25%;">结束到达年龄</th>
+                    <th style="width:25%;">给付比例（%）</th>
+                    <th style="width:25%;">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="uaCoefficientBody">
+                  <tr>
+                    <td><input type="number" value="0" min="0" max="120"></td>
+                    <td><input type="number" value="17" min="0" max="120"></td>
+                    <td><input type="number" value="100" min="0" max="200" step="0.1"></td>
+                    <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
+                  </tr>
+                  <tr>
+                    <td><input type="number" value="18" min="0" max="120"></td>
+                    <td><input type="number" value="40" min="0" max="120"></td>
+                    <td><input type="number" value="160" min="0" max="200" step="0.1"></td>
+                    <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
+                  </tr>
+                  <tr>
+                    <td><input type="number" value="41" min="0" max="120"></td>
+                    <td><input type="number" value="60" min="0" max="120"></td>
+                    <td><input type="number" value="140" min="0" max="200" step="0.1"></td>
+                    <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
+                  </tr>
+                  <tr>
+                    <td><input type="number" value="61" min="0" max="120"></td>
+                    <td><input type="number" value="999" min="0" max="120"></td>
+                    <td><input type="number" value="120" min="0" max="200" step="0.1"></td>
+                    <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
+                  </tr>
+                </tbody>
+              </table>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="addUACoefficientRow()" style="margin-top:6px;">+ 添加年龄段</button>
             </div>
-            <table class="ua-table">
-              <thead>
-                <tr>
-                  <th style="width:25%;">起始到达年龄</th>
-                  <th style="width:25%;">结束到达年龄</th>
-                  <th style="width:25%;">给付比例（%）</th>
-                  <th style="width:25%;">操作</th>
-                </tr>
-              </thead>
-              <tbody id="uaCoefficientBody">
-                <tr>
-                  <td><input type="number" value="0" min="0" max="120"></td>
-                  <td><input type="number" value="17" min="0" max="120"></td>
-                  <td><input type="number" value="100" min="0" max="200" step="0.1"></td>
-                  <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
-                </tr>
-                <tr>
-                  <td><input type="number" value="18" min="0" max="120"></td>
-                  <td><input type="number" value="40" min="0" max="120"></td>
-                  <td><input type="number" value="160" min="0" max="200" step="0.1"></td>
-                  <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
-                </tr>
-                <tr>
-                  <td><input type="number" value="41" min="0" max="120"></td>
-                  <td><input type="number" value="60" min="0" max="120"></td>
-                  <td><input type="number" value="140" min="0" max="200" step="0.1"></td>
-                  <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
-                </tr>
-                <tr>
-                  <td><input type="number" value="61" min="0" max="120"></td>
-                  <td><input type="number" value="999" min="0" max="120"></td>
-                  <td><input type="number" value="120" min="0" max="200" step="0.1"></td>
-                  <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
-                </tr>
-              </tbody>
-            </table>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="addUACoefficientRow()" style="margin-top:6px;">+ 添加年龄段</button>
           </div>
 
           <!-- 区块4: 风险管理费 -->
-          <div class="ua-section">
-            <div class="ua-section-title">🛡️ 风险管理费（保障成本）</div>
-            <div class="ua-row">
-              <div class="form-group">
-                <label>收取方式</label>
-                <select id="uaRiskFeeType" onchange="toggleUARiskFee()">
-                  <option value="none">不收取</option>
-                  <option value="sumAssured">每千元保额年费率</option>
-                  <option value="table">按年龄查表</option>
-                </select>
+          <div class="ua-section collapsed">
+            <div class="ua-section-title" onclick="toggleUASection(this)">🛡️ 风险管理费（保障成本）</div>
+            <div class="ua-section-body">
+              <div class="ua-row">
+                <div class="form-group">
+                  <label>收取方式</label>
+                  <select id="uaRiskFeeType" onchange="toggleUARiskFee()">
+                    <option value="none">不收取</option>
+                    <option value="sumAssured">每千元保额年费率</option>
+                    <option value="table">按年龄查表</option>
+                  </select>
+                </div>
+                <div class="form-group" id="uaRiskFeeRateGroup" style="display:none;">
+                  <label>年费率（每千元保额，元）</label>
+                  <input type="number" id="uaRiskFeeRate" placeholder="如 0.5" min="0" step="0.01">
+                </div>
+                <div class="form-group" id="uaRiskNetGroup" style="display:none;">
+                  <label>风险保额计算</label>
+                  <select id="uaRiskNetCalc">
+                    <option value="basicSum">基本保额</option>
+                    <option value="netAtRisk">基本保额 - 账户价值</option>
+                  </select>
+                </div>
               </div>
-              <div class="form-group" id="uaRiskFeeRateGroup" style="display:none;">
-                <label>年费率（每千元保额，元）</label>
-                <input type="number" id="uaRiskFeeRate" placeholder="如 0.5" min="0" step="0.01">
+              <div id="uaRiskFeeTableContainer" style="display:none; margin-top:8px;">
+                <table class="ua-table" id="uaRiskFeeTable">
+                  <thead>
+                    <tr>
+                      <th>起始年龄</th>
+                      <th>结束年龄</th>
+                      <th>每千元保额年费率（元）</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="uaRiskFeeBody"></tbody>
+                </table>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addUARiskFeeRow()" style="margin-top:6px;">+ 添加年龄段</button>
               </div>
-              <div class="form-group" id="uaRiskNetGroup" style="display:none;">
-                <label>风险保额计算</label>
-                <select id="uaRiskNetCalc">
-                  <option value="basicSum">基本保额</option>
-                  <option value="netAtRisk">基本保额 - 账户价值</option>
-                </select>
-              </div>
-            </div>
-            <div id="uaRiskFeeTableContainer" style="display:none; margin-top:8px;">
-              <table class="ua-table" id="uaRiskFeeTable">
-                <thead>
-                  <tr>
-                    <th>起始年龄</th>
-                    <th>结束年龄</th>
-                    <th>每千元保额年费率（元）</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody id="uaRiskFeeBody"></tbody>
-              </table>
-              <button type="button" class="btn btn-secondary btn-sm" onclick="addUARiskFeeRow()" style="margin-top:6px;">+ 添加年龄段</button>
             </div>
           </div>
 
@@ -2632,7 +2657,7 @@
         <td>${formatMoneyDisplay((parseFloat(p.annualPremium) || 0) * paidYears)}</td>
         <td>${renderBenefitColValue(p, document.getElementById('colBenefitMode').value)}</td>
         <td><span class="tag tag-channel">${escapeHtml(p.channel || '-')}</span></td>
-        <td style="text-align:center;">${p.cashValueImported ? '✅' : ''}</td>
+        <td style="text-align:center;">${(p.cashValueImported || (p.designType === '万能型' && p.universalAccount && p.universalAccount.fundFlows && p.universalAccount.fundFlows.length > 0 && p.universalAccount.interestRates && p.universalAccount.interestRates.length > 0)) ? '✅' : ''}</td>
         <td>
           <div class="actions">
             <button class="action-btn action-edit" onclick="openDetailModal('${p.id}')">详情</button>
@@ -4402,6 +4427,12 @@
   // ===== 万能账户计算引擎 =====
   let _uaCache = {}; // { policyId: { annualRows: [...], summary } }
   function handleUAFieldChange() { /* placeholder - users can recalc via button */ }
+  function toggleUASection(titleEl) {
+    const section = titleEl.closest('.ua-section');
+    if (section) {
+      section.classList.toggle('collapsed');
+    }
+  }
   
   function getUAConfig() {
     return {
