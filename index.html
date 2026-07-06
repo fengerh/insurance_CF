@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>保单管理工具 v20260706.1057</title>
+<title>保单管理工具 v20260706.1700</title>
 <link rel="stylesheet" href="insurance_CF.css">
 
 </head>
@@ -316,7 +316,7 @@
 
         <!-- 退保信息 -->
         <div class="form-row" id="surrenderCheckRow">
-          <div class="form-group" id="manualAnnuityGroup" style="display: flex; align-items: center;">
+          <div class="form-group" id="manualAnnuityGroup" style="display: flex; align-items: center; gap: 16px; flex-wrap:wrap;">
             <label style="margin: 0; display: flex; align-items: center; gap: 8px; white-space: nowrap;">
               <input type="checkbox" id="manualAnnuity" onchange="updateCashValueTable()">
               手动输入年金
@@ -353,6 +353,27 @@
                 </label>
           </div>
         </div>
+          <!-- 转入万能 -->
+        <div class="form-row" id="transferToUARow">
+          <div class="form-group"  style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <label style="margin:0;display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:13px;color:#6b7280;">
+              <input type="checkbox" id="transferToUA" onchange="onTransferToUAChange()">
+              年金转入万能
+            </label>
+          </div>
+          
+            <select id="linkedUAPolicy" style="display:none;max-width:200px;font-size:12px;margin:0;flex-wrap:nowrap;align-self:center;height:fit-content;" onchange="onLinkedUAPolicyChange()">
+              <option value="">-- 请选择关联的万能险保单 --</option>
+            </select>
+         
+          <div class="form-group" > 
+            <span id="linkedUAPrompt" style="display:none;font-size:12px;color:#d97706;"></span>
+            </div>
+        </div>
+       
+
+        
+       
 
         <!-- 备注 -->
         <div class="form-row full">
@@ -370,16 +391,22 @@
           <label>📋 批量粘贴（从 Excel 复制，每行：保单年度 + 现金价值 + <span id="dividendPasteHint" style="display:none;">累计年度红利</span> + <span id="annuityPasteHint" style="display:none;">年金金额</span>）</label>
           <textarea id="batchPasteInput" placeholder="1 50000 1200&#10;2 52000 1300&#10;3 54000 1400" oninput="parseBatchPaste()"></textarea>
         </div>
+        <div id="transferBatchOps" style="display:none;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="batchSetTransfer(true)">全部转入万能</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="batchSetTransfer(false)">全部取消转入</button>
+          <span style="font-size:11px;color:#6b7280;">（仅对年金金额>0的行生效）</span>
+        </div>
         <table class="cash-value-table" id="cashValueTable">
           <thead>
             <tr>
-              <th style="width:20%;">保单年度</th>
-              <th style="width:30%;"><span id="cashValueColLabel">现金价值（元）</span></th>
-              <th style="width:20%;" id="dividendColHeader" style="display:none;">累计年度红利（元）</th>
-              <th style="width:7%;" id="distributedColHeader" style="display:none;">已分配</th>
+              <th style="width:18%;">保单年度</th>
+              <th style="width:26%;"><span id="cashValueColLabel">现金价值（元）</span></th>
+              <th style="width:18%;" id="dividendColHeader" style="display:none;">累计年度红利（元）</th>
+              <th style="width:6%;" id="distributedColHeader" style="display:none;">已分配</th>
               <th style="width:12%;" id="annuityColHeader" style="display:none;">年金金额（元）</th>
-              <th style="width:12%;" id="otherIncomeColHeader" style="display:none;">其他收入（元）</th>
-              <th style="width:7%;">操作</th>
+              <th style="width:8%;" id="transferColHeader" style="display:none;">转万能</th>
+              <th style="width:10%;" id="otherIncomeColHeader" style="display:none;">其他收入（元）</th>
+              <th style="width:6%;">操作</th>
             </tr>
           </thead>
           <tbody id="cashValueBody"></tbody>
@@ -407,11 +434,14 @@
           <div class="benefit-tooltip" id="benefitTooltip"></div>
         </div>
         <div class="benefit-summary" id="benefitSummary" style="display:none;">
-          <div class="benefit-summary-title" id="benefitSummaryTitle">第 1 保单年度利益测算</div>
-          <div class="benefit-summary-row">
-            <span class="benefit-summary-item"><span class="bs-label">单利年化：</span><span class="bs-val" id="bsSimple">-</span></span>
-            <span class="benefit-summary-item"><span class="bs-label">复利(IRR)：</span><span class="bs-val" id="bsIRR">-</span></span>
+          <div class="benefit-summary-left">
+            <div class="benefit-summary-title" id="benefitSummaryTitle">第 1 保单年度利益测算</div>
+            <div class="benefit-summary-row">
+              <span class="benefit-summary-item"><span class="bs-label">单利年化：</span><span class="bs-val" id="bsSimple">-</span></span>
+              <span class="benefit-summary-item"><span class="bs-label">复利(IRR)：</span><span class="bs-val" id="bsIRR">-</span></span>
+            </div>
           </div>
+          <div class="benefit-summary-right" id="benefitBaseInfo"></div>
         </div>
         <div class="benefit-table-wrapper" id="benefitTableWrapper">
           <table class="benefit-table" id="benefitTable"></table>
@@ -429,7 +459,7 @@
 
           <!-- 区块1: 基本参数 -->
           <div class="ua-section collapsed">
-            <div class="ua-section-title" onclick="toggleUASection(this)">📊 基本参数</div>
+            <div class="ua-section-title" onclick="toggleUASection(this)">📊 基本参数（年金险关联）</div>
             <div class="ua-section-body">
               <div class="ua-row">
                 <div class="form-group">
@@ -451,6 +481,13 @@
                     <option value="min">按最低保证利率</option>
                   </select>
                 </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;padding-top:8px;font-size:13px;border-top:1px solid #e5e7eb;margin-top:8px;">
+                <label style="margin:0;display:flex;align-items:center;gap:4px;white-space:nowrap;font-weight:500;">
+                  <input type="checkbox" id="uaCanReceiveTransfer" onchange="onUACanReceiveTransferChange()">
+                  接受年金转入（关联年金险可转入本万能账户）
+                </label>
+                <span id="uaLinkedAnnuityPrompt" style="display:none;font-size:12px;color:#059669;"></span>
               </div>
             </div>
           </div>
@@ -587,7 +624,31 @@
             <div class="ua-calc-result" id="uaCalcResult" style="display:none; margin-top:12px;"></div>
           </div>
 
-          <!-- 区块5: 资金出入流水表 -->
+          <!-- 区块5: 年金转入明细 -->
+          <div class="ua-section" id="uaTransferSection" style="display:none;">
+            <div class="ua-section-title">📥 年金转入明细</div>
+            <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">
+              来自关联年金险的转入记录。转入金额 = 对应年金险年金金额，不可修改；手续费、返还方式可编辑。
+            </div>
+            <table class="ua-table" id="uaTransferTable">
+              <thead>
+                <tr>
+                  <th style="width:14%;">转入日期</th>
+                  <th style="width:14%;">来源保单</th>
+                  <th style="width:12%;">转入金额（元）</th>
+                  <th style="width:10%;">手续费率%</th>
+                  <th style="width:14%;">返还方式</th>
+                  <th style="width:9%;">返还N年</th>
+                  <th style="width:16%;">返还日期</th>
+                  <th style="width:8%;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="uaTransferBody"></tbody>
+            </table>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="addUATransferRow()" style="margin-top:8px;">+ 添加转入记录</button>
+          </div>
+
+          <!-- 区块6: 资金出入流水表 -->
           <div class="ua-section">
             <div class="ua-section-title">💰 资金出入流水表</div>
             <div style="font-size:12px; color:#6b7280; margin-bottom:8px;">
@@ -613,7 +674,9 @@
             <button type="button" class="btn btn-primary btn-sm" onclick="recalcUAAccount()" style="margin-top:6px;margin-left:6px;">🔄 重新计算账户价值</button>
           </div>
 
-          <!-- 区块6: 年度账户价值结果 -->
+          
+
+          <!-- 区块7: 年度账户价值结果 -->
           <div class="ua-section" id="uaResultSection" style="display:none;">
             <div class="ua-section-title">📋 账户价值演示结果</div>
             <div style="max-height:300px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;">
@@ -670,6 +733,9 @@
 
 
 
-<script src="insurance_CF.js"></script>
+<script src="insurance_CF_core.js"></script>
+<script src="insurance_CF_list.js"></script>
+<script src="insurance_CF_form.js"></script>
+<script src="insurance_CF_ua.js"></script>
 </body>
 </html>

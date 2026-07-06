@@ -317,7 +317,7 @@
     overflow-y: auto;
   }
   .modal-header {
-    padding: 20px 24px;
+    padding: 8px 20px;
     border-bottom: 1px solid #e5e7eb;
     display: flex;
     justify-content: space-between;
@@ -337,11 +337,11 @@
   }
   .modal-close:hover { color: #374151; }
   .modal-body {
-    padding: 24px;
+    padding: 12px 24px;
   }
   .modal-footer {
     align-items: flex-end;
-    padding: 16px 24px;
+    padding: 8px 20px;
     border-top: 1px solid #e5e7eb;
     display: flex;
     gap: 10px;
@@ -571,12 +571,28 @@
   .benefit-tooltip .tt-label { color: #d1d5db; }
   .benefit-tooltip .tt-val { font-weight: 500; text-align: right; }
   .benefit-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  .benefit-summary-left,
+  .benefit-summary-right {
+    min-width: 0;
     background: #f9fafb;
     border: 1px solid #e5e7eb;
     border-radius: 8px;
     padding: 16px;
-    margin-bottom: 12px;
   }
+  .benefit-summary-right {
+    text-align: left;
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.9;
+    white-space: normal;
+  }
+  .benefit-summary-right b { color: #374151; }
+  #benefitTable tbody tr.benefit-row-anniv td { font-weight: 700; }
   .benefit-summary-title {
     font-size: 15px;
     font-weight: 600;
@@ -646,6 +662,7 @@
     .toolbar { flex-direction: column; align-items: stretch; }
     .toolbar-left { justify-content: flex-start; }
     .benefit-tooltip { font-size: 11px; padding: 8px 10px; }
+    .benefit-summary { grid-template-columns: 1fr; }
   }
 
   /* 筛选区（整行） */
