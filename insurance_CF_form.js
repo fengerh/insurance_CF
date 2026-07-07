@@ -1603,6 +1603,7 @@
 
     const data = {
       id: id || Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
+      updatedAt: new Date().toISOString(),
       company,
       productName,
       productCategory,

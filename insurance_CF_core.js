@@ -24,16 +24,17 @@
     // 设置基准日期为今天
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-    document.getElementById('calcDate').value = todayStr;
+    const calcDateEl = document.getElementById('calcDate');
+    calcDateEl.value = todayStr;
     baseDate = new Date(todayStr + 'T00:00:00');
-    // 监听日期变化
-    document.getElementById('calcDate').addEventListener('change', function(e) {
-      const val = e.target.value;
+
+    // 统一处理基准日期变化
+    function applyBaseDate(val) {
       if (val) {
         baseDate = new Date(val + 'T00:00:00');
       } else {
         baseDate = new Date();
-        document.getElementById('calcDate').value = new Date().toISOString().slice(0,10);
+        calcDateEl.value = new Date().toISOString().slice(0,10);
       }
       renderStats();
       renderTable();
@@ -43,7 +44,13 @@
         renderCalendar();
       }
       if (currentView === 'waterfall') renderWaterfall();
-    });
+    }
+    // 方向键交给原生 <input type="date"> 处理：
+    // 选中某段（年/月/日）后用 ←/→ 在段间移动焦点，↑/↓ 在该段 ±1，
+    // 并在月末/年末自动跨月/跨年。挂 input 事件保证按键即时刷新视图。
+    const onDateChange = e => applyBaseDate(e.target.value);
+    calcDateEl.addEventListener('change', onDateChange);
+    calcDateEl.addEventListener('input', onDateChange);
     renderStats();
     renderTable();
     updateFilterCounts();
@@ -830,6 +837,7 @@
           return p;
         });
         syncAllTransferRecords(); // 启动加载后，从年金险元数据自愈万能账户转入记录
+        updateSaveHint();
       } catch (e) {
         policies = [];
       }
@@ -838,6 +846,26 @@
 
   function saveData() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(policies));
+    updateSaveHint();
+  }
+
+  function updateSaveHint() {
+    const el = document.getElementById('saveTimeLabel');
+    if (!el) return;
+    let latest = null;
+    for (const p of policies) {
+      if (p && p.updatedAt) {
+        const t = new Date(p.updatedAt).getTime();
+        if (!isNaN(t) && (latest === null || t > latest)) latest = t;
+      }
+    }
+    if (latest === null) {
+      el.textContent = '暂无记录';
+      return;
+    }
+    const d = new Date(latest);
+    const pad = n => String(n).padStart(2, '0');
+    el.textContent = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
   function calcPaidYears(startDate, paymentTerm, baseDate) {
     if (!startDate) return 0;
@@ -1017,7 +1045,11 @@
       <div class="stats-row-5">
         <div class="stat-card">
           <div class="stat-label">保单总数</div>
-          <div class="stat-value" >${totalAll} 份 / <span style="color:#059669;">有效 ${total}</span> / <span style="color:#9ca3af;font-size:14px;">另不计入 ${excludedCount}</span></div>
+          <div class="stat-value" style="display:inline-flex; align-items:center; gap:8px; font-size:18px;">
+            <span>${totalAll} 份</span>
+            <span style="color:#059669; font-size:15px;"> / 有效 ${total} / </span>
+            <span style="color:#9ca3af; font-size:14px;">另不计入 ${excludedCount}</span>
+          </div>
         </div>
         <div class="stat-card">
           <div class="stat-label">保单状态分布</div>
