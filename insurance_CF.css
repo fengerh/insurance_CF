@@ -1,0 +1,1182 @@
+  /* 所有样式保持不变，仅调整布局相关 */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: #f5f7fa;
+    color: #333;
+    padding: 20px;
+  }
+  .container { max-width: 1600px; margin: 0 auto; }
+  h1 {
+    font-size: 24px;
+    font-weight: 600;
+    color: #1a1a2e;
+  }
+
+  /* ===== 新增头部布局（标题 + 右侧操作） ===== */
+  .header-wrapper {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .header-left {
+    
+    display: flex;
+    align-items: center;
+  }
+  .header-wrapper h1 {
+    font-size: 24px;
+    font-weight: 600;
+    color: #1a1a2e;
+    margin: 0;
+  }
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .save-hint {
+    font-size: 13px;
+    color: #6b7280;
+  }
+  .header-actions .btn {
+    height: 34px;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+  }
+
+  /* 顶部操作栏 */
+  .toolbar {
+    display: flex;
+    justify-content: flex-start; /* 改为左对齐，防止换行 */
+    align-items: center;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .toolbar-left {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+    align-items: center;
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+  .btn-primary {
+    background: #4f46e5;
+    color: white;
+  }
+  .btn-primary:hover:not(:disabled) { background: #4338ca; }
+  .btn-secondary {
+    background: white;
+    color: #4f46e5;
+    border: 1px solid #4f46e5;
+  }
+  .btn-secondary:hover:not(:disabled) { background: #f0f0ff; }
+  .btn-danger {
+    background: #ef4444;
+    color: white;
+  }
+  .btn-danger:hover:not(:disabled) { background: #dc2626; }
+  .btn-sm {
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+
+  /* 统计卡片容器 — 统一 5 列 Grid，上下自动对齐 */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(5, auto);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  /* 每一行 4 列，保留备用 */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  /* 5 列行（保留兼容但不参与 grid 父容器） */
+  .stats-row-5 {
+    display: contents;
+  }
+
+  /* 单个卡片：内部标签和数值横向排列 */
+  .stat-card {
+    background: white;
+    padding: 8px 16px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    min-height: 48px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .stat-label {
+    font-size: 14px;
+    color: #6b7280;
+    margin: 0;
+    flex-shrink: 0;
+  }
+
+  .stat-value {
+    font-size: 22px;
+    font-weight: 600;
+    color: #1f2937;
+    line-height: 1.2;
+    align-items: right;
+  }
+  .stat-value.premium {
+    color: #059669;
+  }
+
+  /* 表格 */
+  .table-wrapper {
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    width: 100%; /* 确保宽度撑满 */
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    table-layout: auto;
+  }
+  thead {
+    background: #f9fafb;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  th {
+    padding: 12px 10px;
+    text-align: center;
+    font-weight: 600;
+    color: #374151;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    background: #f9fafb;
+  }
+  td {
+    padding: 10px;
+    border-bottom: 1px solid #f3f4f6;
+    vertical-align: middle;
+    text-align: center;
+    white-space: nowrap;
+  }
+  th.sortable {
+    cursor: pointer;
+    user-select: none;
+  }
+  th.sortable:hover {
+    color: #4f46e5;
+  }
+  .sort-indicator {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 10px;
+    opacity: 0.4;
+  }
+  th.sortable.asc .sort-indicator::after {
+    content: '\25B2';
+    opacity: 1;
+    color: #4f46e5;
+  }
+  th.sortable.desc .sort-indicator::after {
+    content: '\25BC';
+    opacity: 1;
+    color: #4f46e5;
+  }
+  tr:hover { background: #f9fafb; }
+  tr:hover td, 
+  tr:hover td * { 
+    text-shadow: 0 0.5px 0.5px rgba(0, 0, 0, 0.309);
+  }
+  tr:last-child td { border-bottom: none; }
+
+  /* 标签样式 */
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .tag-category-终身寿险 { background: #fce7f3; color: #9d174d; }
+  .tag-category-定期寿险 { background: #d1fae5; color: #065f46; }
+  .tag-category-两全保险 { background: #f3e5f5; color: #4a148c; }
+  .tag-category-养老年金保险 { background: #ccfbf1; color: #0f766e; }
+  .tag-category-年金保险 { background: #dbeafe; color: #1e40af; }
+  .tag-category-重大疾病保险 { background: #fee2e2; color: #991b1b; }
+  .tag-category-护理保险 { background: #e0e7ff; color: #3730a3; }
+  .tag-category-意外伤害保险 { background: #fff3e0; color: #e65100; }
+
+  .tag-design-普通型 { background: #f3f4f6; color: #4b5563; }
+  .tag-design-分红型 { background: #fef3c7; color: #92400e; }
+  .tag-design-万能型 { background: #ede9fe; color: #6d28d9; }
+
+  .tag-status-交费中 { background: #fef3c7; color: #92400e; }
+  .tag-status-paydue { background: #fee2e2; color: #dc2626; font-weight: 700; }
+  .tag-status-缴清 { background: #d1fae5; color: #065f46; }
+  .tag-status-年金领取 { background: #ccfbf1; color: #0f766e; }
+  .tag-status-满期 { background: #f3e5f5; color: #6b21a8; }
+  .tag-status-退保 { background: #fee2e2; color: #dc2626; }
+
+  .tag-channel { background: #f3f4f6; color: #4b5563; }
+
+  .product-name-text {
+    display: inline-block;
+    white-space: nowrap;
+    font-size: 13px;
+    line-height: 1.2;
+    vertical-align: middle;
+  }
+
+  /* 操作列 */
+  .actions {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+  }
+  .action-btn {
+    padding: 4px 8px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.15s;
+  }
+  .action-edit {
+    background: #eff6ff;
+    color: #2563eb;
+  }
+  .action-edit:hover { background: #dbeafe; }
+  .action-delete {
+    background: #fef2f2;
+    color: #dc2626;
+  }
+  .action-delete:hover { background: #fee2e2; }
+
+  /* 空状态 */
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #9ca3af;
+  }
+  .empty-state-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+  }
+  .empty-state-text {
+    font-size: 14px;
+  }
+
+  /* 模态框 */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+  }
+  .modal-overlay.active {
+    display: flex;
+  }
+  .modal {
+    background: white;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 800px;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .modal-header {
+    padding: 8px 20px;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .modal-title {
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: #9ca3af;
+    line-height: 1;
+  }
+  .modal-close:hover { color: #374151; }
+  .modal-body {
+    padding: 12px 24px;
+  }
+  .modal-footer {
+    align-items: flex-end;
+    padding: 8px 20px;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    gap: 10px;
+    flex-direction: row-reverse;
+  }
+
+  /* 表单 */
+  .form-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .form-row.full {
+    grid-template-columns: 1fr;
+  }
+  .form-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: #374151;
+    margin-bottom: 6px;
+  }
+  .form-group label .required {
+    color: #ef4444;
+    margin-left: 2px;
+  }
+  .form-group input,
+  .form-group select,
+  .form-group textarea {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .form-group input:focus,
+  .form-group select:focus,
+  .form-group textarea:focus {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+  }
+  /* 详情页禁用输入框：内容过长时显示省略号，并提供 tooltip */
+  .form-group input:disabled,
+  .form-group select:disabled,
+  .form-group textarea:disabled {
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+    cursor: help;
+    background: #f9fafb;
+    color: #374151;
+  }
+  .form-group textarea:disabled {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .form-group textarea {
+    resize: vertical;
+    min-height: 60px;
+  }
+
+  /* 退保字段 */
+  #surrenderCheckRow {
+    margin-bottom: 12px;
+  }
+
+  /* 选项卡 */
+  .modal-tabs {
+    display: flex;
+    border-bottom: 2px solid #e5e7eb;
+    margin-bottom: 16px;
+  }
+  .modal-tab {
+    padding: 8px 20px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: #6b7280;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.2s;
+  }
+  .modal-tab.active {
+    color: #4f46e5;
+    border-bottom-color: #4f46e5;
+  }
+  .modal-tab:hover { color: #4f46e5; }
+
+  /* 现金价值表格 */
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  .cash-value-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+  .cash-value-table th {
+    background: #f9fafb;
+    padding: 8px 6px;
+    text-align: center;
+    font-weight: 600;
+    color: #374151;
+    border: 1px solid #e5e7eb;
+  }
+  .cash-value-table td {
+    padding: 4px 6px;
+    border: 1px solid #e5e7eb;
+    text-align: center;
+  }
+  .cash-value-table input {
+    width: 100%;
+    padding: 5px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    text-align: center;
+    outline: none;
+  }
+  .cash-value-table input:focus {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 2px rgba(79,70,229,0.1);
+  }
+  .cash-value-table .del-row-btn {
+    background: none;
+    border: none;
+    color: #dc2626;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 2px 6px;
+  }
+  .batch-paste-area {
+    margin-bottom: 12px;
+  }
+  .batch-paste-area label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #374151;
+    margin-bottom: 4px;
+    display: block;
+  }
+  .batch-paste-area textarea {
+    width: 100%;
+    height: 60px;
+    padding: 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: monospace;
+    outline: none;
+    resize: vertical;
+  }
+  .batch-paste-area textarea:focus {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 2px rgba(79,70,229,0.1);
+  }
+  .batch-paste-area .btn {
+    margin-top: 4px;
+  }
+
+  /* 确认对话框 */
+  .confirm-modal .modal {
+    max-width: 400px;
+  }
+  .confirm-content {
+    padding: 24px;
+    text-align: center;
+  }
+  .confirm-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+  }
+  .confirm-text {
+    font-size: 15px;
+    color: #374151;
+    margin-bottom: 20px;
+  }
+
+  /* 利益演示 */
+  .benefit-chart-container {
+    position: relative;
+    width: 100%;
+    background: #fafbfc;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    margin-bottom: 16px;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .benefit-chart-container canvas {
+    display: block;
+    width: 100%;
+  }
+  .benefit-tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: rgba(0,0,0,0.85);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: nowrap;
+    z-index: 10;
+    display: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  }
+  .benefit-tooltip .tt-year {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: #fbbf24;
+  }
+  .benefit-tooltip .tt-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
+  }
+  .benefit-tooltip .tt-label { color: #d1d5db; }
+  .benefit-tooltip .tt-val { font-weight: 500; text-align: right; }
+  .benefit-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  .benefit-summary-left,
+  .benefit-summary-right {
+    min-width: 0;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .benefit-summary-right {
+    text-align: left;
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.9;
+    white-space: normal;
+  }
+  .benefit-summary-right b { color: #374151; }
+  #benefitTable tbody tr.benefit-row-anniv td { font-weight: 700; }
+  .benefit-summary-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1f2937;
+    margin-bottom: 8px;
+  }
+  .benefit-summary-row {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: #374151;
+  }
+  .benefit-summary-item {
+    display: flex;
+    gap: 6px;
+  }
+  .benefit-summary-item .bs-label { color: #6b7280; }
+  .benefit-summary-item .bs-val { font-weight: 600; }
+  .benefit-summary-item .bs-val.positive { color: #059669; }
+  .benefit-summary-item .bs-val.negative { color: #dc2626; }
+  .benefit-table-wrapper {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+  }
+  .benefit-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .benefit-table th {
+    background: #f9fafb;
+    padding: 8px 6px;
+    text-align: center;
+    font-weight: 600;
+    color: #374151;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .benefit-table td {
+    padding: 6px;
+    text-align: center;
+    border-bottom: 1px solid #f3f4f6;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .benefit-table tr:hover td {
+    background: #eff6ff;
+  }
+  .benefit-table tr.selected td {
+    background: #dbeafe;
+    font-weight: 600;
+  }
+  .benefit-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: #9ca3af;
+    font-size: 14px;
+  }
+
+  @media (max-width: 768px) {
+    .form-row { grid-template-columns: 1fr; }
+    .toolbar { flex-direction: column; align-items: stretch; }
+    .toolbar-left { justify-content: flex-start; }
+    .benefit-tooltip { font-size: 11px; padding: 8px 10px; }
+    .benefit-summary { grid-template-columns: 1fr; }
+  }
+
+  /* 筛选区（整行） */
+  .filter-bar {
+    background: white;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+
+  .filter-item.label-group {
+    display: flex;
+    align-items: center;
+    height: 34px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background: white;
+    padding: 0;
+    overflow: hidden;
+    gap: 0;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    box-sizing: border-box;
+  }
+
+  .filter-item.label-group label,
+  .filter-item.label-group select,
+  .filter-item.label-group input {
+    font-family: inherit;
+    font-size: 13px;
+    line-height: normal;
+    font-weight: 400;
+    box-sizing: border-box;
+    color: #1f2937;
+  }
+
+  .filter-item.label-group label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 0 10px;
+    background: #f3f4f6;
+    border-right: 1px solid #d1d5db;
+    flex-shrink: 0;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .filter-item.label-group select,
+  .filter-item.label-group input {
+    border: none;
+    background: transparent;
+    height: 100%;
+    padding: 0 10px;
+    outline: none;
+    margin: 0;
+    min-width: 80px;
+  }
+
+  .filter-item.label-group input {
+    max-width: 120px;
+  }
+
+  .filter-item.label-group select {
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 24px;
+    background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E") no-repeat right 8px center;
+    background-size: 12px;
+  }
+
+  .filter-item.label-group:focus-within {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+    z-index: 1;
+  }
+
+  .filter-action {
+    display: flex;
+    align-items: center;
+    height: 34px;
+  }
+  .filter-action .btn {
+    height: 100%;
+    padding: 0 16px;
+    font-size: 13px;
+    border-radius: 6px;
+    font-family: inherit;
+    line-height: normal;
+  }
+
+  .filter-right-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+  }
+
+  .filter-date-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 34px;
+  }
+
+  .filter-date-group .filter-item.label-group {
+    height: 34px;
+  }
+
+  .filter-date-group .btn {
+    height: 100%;
+    padding: 0 12px;
+    font-size: 13px;
+    border-radius: 6px;
+  }
+
+  #toggleAmountBtn {
+    min-width: 90px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #extraFieldsContainer .form-group {
+    min-width: 150px;
+  }
+  #maturityFields, #annuityFields {
+    margin-top: 8px;
+  }
+
+  #insuredAge {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  #insuredAge:focus {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+  }
+
+  #annuityFields .form-group {
+    min-width: 120px;
+  }
+  #annuityStartDate {
+    cursor: default;
+  }
+
+  .view-toggle {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 16px;
+  }
+  .view-toggle .btn {
+    height: 30px;
+    padding: 0 14px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #4f46e5;
+    border-radius: 0;
+    margin: 0;
+  }
+  .view-toggle .btn:first-child {
+    border-radius: 6px 0 0 6px;
+  }
+  .view-toggle .btn:last-child {
+    border-radius: 0 6px 6px 0;
+  }
+  .view-toggle .btn + .btn {
+    border-left: none;
+  }
+  .view-toggle .btn.active {
+    background: #4f46e5;
+    color: white;
+  }
+  .view-toggle .btn:not(.active) {
+    background: white;
+    color: #4f46e5;
+  }
+
+  /* 新增保单按钮与切换按钮统一尺寸 */
+  #listAddBtn {
+    height: 30px;
+    padding: 0 14px;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .action-group {
+    display: inline-flex;
+    align-items: center;
+  }
+  .action-group .btn {
+    height: 30px;
+    padding: 0 14px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #4f46e5;
+    border-radius: 0;
+    margin: 0;
+  }
+  .action-group .btn:first-child {
+    border-radius: 6px 0 0 6px;
+  }
+  .action-group .btn:last-child {
+    border-radius: 0px 6px 6px 0px;
+  }
+  .action-group .btn + .btn {
+    border-left: none;
+  }
+
+  /* 日历视图 */
+  #calendarView {
+    width: 100%;
+  }
+  #calendarGrid {
+    width: 100%;
+  }
+
+  /* ===== 万能账户面板 ===== */
+  .ua-section {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .ua-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #4f46e5;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ua-section-title::before {
+    content: '';
+    display: inline-block;
+    width: 4px;
+    height: 16px;
+    background: #4f46e5;
+    border-radius: 2px;
+  }
+  /* 万能账户区块折叠 */
+  .ua-section-title {
+    cursor: pointer;
+    user-select: none;
+  }
+  .ua-section-title::after {
+    content: ' \25B2';
+    font-size: 11px;
+    color: #9ca3af;
+    margin-left: auto;
+  }
+  .ua-section.collapsed .ua-section-title::after {
+    content: ' \25BC';
+  }
+  .ua-count {
+    font-size: 12px;
+    font-weight: 600;
+    color: #4f46e5;
+    margin-left: 8px;
+  }
+  .ua-section.collapsed .ua-section-body {
+    display: none !important;
+  }
+  .ua-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .ua-row .form-group {
+    flex: 1;
+    min-width: 120px;
+  }
+  .ua-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .ua-table th {
+    background: #f3f4f6;
+    padding: 6px 4px;
+    text-align: center;
+    font-weight: 600;
+    color: #374151;
+    border: 1px solid #e5e7eb;
+    font-size: 11px;
+  }
+  .ua-table td {
+    padding: 3px 4px;
+    border: 1px solid #e5e7eb;
+    text-align: center;
+  }
+  .ua-table input {
+    width: 100%;
+    padding: 4px 6px;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    font-size: 12px;
+    text-align: center;
+    outline: none;
+  }
+  .ua-table input:focus {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 2px rgba(79,70,229,0.1);
+  }
+  .ua-table select {
+    width: 100%;
+    padding: 4px;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    font-size: 12px;
+    text-align: center;
+    outline: none;
+  }
+  .ua-table .del-row-btn {
+    background: none;
+    border: none;
+    color: #dc2626;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 2px 6px;
+  }
+  .ua-calc-result {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-top: 12px;
+    font-size: 13px;
+    color: #065f46;
+  }
+  .ua-calc-result strong {
+    font-size: 16px;
+  }
+  #universalAccountTab {
+    display: none;
+  }
+
+  /* ===== 瀑布流视图 ===== */
+  #waterfallView {
+    width: 100%;
+  }
+  .wf-banner {
+    background: #eff6ff;
+    color: #1e40af;
+    border: 1px solid #dbeafe;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  .wf-month-card {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .wf-month-card.current {
+    background: #eef2ff;
+    border-color: #c7d2fe;
+    color: #1e293b;
+  }
+  .wf-month-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 16px;
+    font-weight: 600;
+    transition: background 0.15s;
+  }
+  .wf-month-header:hover {
+    background: rgba(0,0,0,0.02);
+  }
+  .wf-month-card.current .wf-month-header:hover {
+    background: rgba(0,0,0,0.04);
+  }
+  .wf-toggle-icon {
+    font-size: 12px;
+    opacity: 0.85;
+  }
+  .wf-summary {
+    padding: 0 16px 14px;
+    font-size: 13px;
+    color: #6b7280;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 4px;
+    align-items: center;
+  }
+  .wf-month-card.current .wf-summary {
+    color: #475569;
+  }
+  .wf-section {
+    padding: 0 16px 12px;
+  }
+  .wf-section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .wf-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #374151;
+  }
+  .wf-month-card.current .wf-section-title {
+    color: #374151;
+  }
+  .wf-section-meta {
+    font-size: 12px;
+    color: #6b7280;
+    white-space: nowrap;
+  }
+  .wf-month-card.current .wf-section-meta {
+    color: #6b7280;
+  }
+  .wf-event-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .wf-event-item {
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 5px 8px;
+    border-radius: 6px;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+  .wf-benefit {
+    padding: 10px 16px 14px;
+    font-size: 13px;
+    color: #6b7280;
+    border-top: 1px dashed #e5e7eb;
+  }
+  .wf-month-card.current .wf-benefit {
+    color: #475569;
+    border-top-color: #c7d2fe;
+  }
+  .wf-grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    padding: 0 16px 12px;
+  }
+  .wf-col {
+    background: #ffffff;
+    border: 1px solid #e0e7ff;
+    border-radius: 8px;
+    padding: 10px;
+  }
+  .wf-col-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .wf-col-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #374151;
+  }
+  .wf-col-meta {
+    font-size: 12px;
+    color: #6b7280;
+    white-space: nowrap;
+  }
+  .wf-col-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .wf-col-empty {
+    font-size: 12px;
+    color: #9ca3af;
+    padding: 2px 0;
+  }
+  .wf-col--empty {
+    background: #f9fafb;
+    border-color: #e5e7eb;
+    filter: grayscale(1);
+    opacity: 0.65;
+  }
+  .wf-col--empty .wf-col-title,
+  .wf-col--empty .wf-col-meta {
+    color: #9ca3af;
+  }
+  @media (max-width: 768px) {
+    .wf-grid-3 { grid-template-columns: 1fr; }
+  }
