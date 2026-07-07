@@ -13,7 +13,7 @@
       }
     });
     // Control UA action buttons
-    const uaBtns = ['+ 新增资金记录', '+ 新增月份', '+ 添加年龄段', '🔄 重新计算账户价值', '📥 同步到现金价值表'];
+    const uaBtns = ['+ 新增资金记录', '+ 添加转入记录', '+ 新增月份', '+ 添加年龄段', '🔄 重新计算账户价值', '📥 同步到现金价值表'];
     document.querySelectorAll('#uaContent .btn').forEach(btn => {
       const text = btn.textContent.trim();
       if (uaBtns.some(t => text.startsWith(t))) {
@@ -27,12 +27,18 @@
       btn.disabled = !enabled;
       btn.style.opacity = enabled ? '1' : '0.45';
     });
+    // 转入万能批量按钮与"添加一行"同步可用状态（详情/只读模式下一并禁用）
+    document.querySelectorAll('#transferBatchOps button').forEach(btn => {
+      btn.disabled = !enabled;
+      btn.style.opacity = enabled ? '1' : '0.45';
+    });
   }
 
   function openAddModal() {
     switchTab('basicInfo');
     document.getElementById('modalTitle').textContent = '新增保单';
     document.getElementById('policyForm').reset();
+    if (typeof clearUAForm === 'function') clearUAForm();
     document.getElementById('maturityAmount').value = '';
     document.getElementById('maturityDate').value = '';
     document.getElementById('annualPayout').value = '';
@@ -133,7 +139,7 @@
     updateAutoCalc();
     // 初始化现金价值数据
     if (!policy.cashValues) policy.cashValues = [];
-    setTempCashValues(JSON.stringify(policy.cashValues));
+    setTempCashValues(policy.cashValues);
     document.getElementById('cashValueImported').checked = policy.cashValueImported || false;
     updateCashValueTable();
 
@@ -329,7 +335,11 @@
 
   function getFormCashValues() {
     const policy = getCurrentFormPolicy();
-    if (policy && policy.cashValues) return policy.cashValues;
+    if (policy && policy.cashValues) {
+      let cv = policy.cashValues;
+      if (typeof cv === 'string') { try { cv = JSON.parse(cv); } catch(e) { cv = []; } }
+      return Array.isArray(cv) ? cv : [];
+    }
     return getTempCashValues();
   }
 
@@ -1143,38 +1153,62 @@
     if (!policy) return 0;
     const year = selectedRow.year;
 
-    // 万能型：按实际资金出入和账户价值计算IRR
+    // 万能型：按实际资金出入（自有流水 + 年金转入）和账户价值计算IRR
     if (policy.designType === '万能型' && policy.universalAccount && policy.universalAccount.fundFlows) {
       const ua = policy.universalAccount;
       const fundFlows = ua.fundFlows || [];
+      const transferRecords = ua.transferRecords || [];   // 年金转入记录
       const startDate = policy.startDate ? new Date(policy.startDate) : null;
       if (!startDate || isNaN(startDate.getTime())) return 0;
 
+      const YEAR_MS = 365.25 * 24 * 3600 * 1000;
       // 按保单年度汇总净现金流（投资者视角：流出为负，流入为正）
       const yearlyNetCF = {};
-      fundFlows.forEach(f => {
-        const fd = new Date(f.date);
-        if (isNaN(fd.getTime())) return;
-        const y = Math.ceil((fd - startDate) / (365.25 * 24 * 3600 * 1000));
-        if (y < 1) return;
+      function bucketYear(dateStr) {
+        const fd = new Date(dateStr);
+        if (isNaN(fd.getTime())) return null;
+        return Math.ceil((fd - startDate) / YEAR_MS); // 起始日（第0年）也计入
+      }
+      function addFlow(dateStr, flowType, amount, feeRate) {
+        const y = bucketYear(dateStr);
+        if (y === null || y < 0) return;
         if (!yearlyNetCF[y]) yearlyNetCF[y] = 0;
-        const amt = parseFloat(f.amount) || 0;
-        const fee = amt * (parseFloat(f.feeRate || 0) / 100);
-        if (f.flowType === 'in') {
-          yearlyNetCF[y] -= (amt + fee); // 投资者支付保费+手续费，现金流出
+        const amt = parseFloat(amount) || 0;
+        const fee = amt * (parseFloat(feeRate || 0) / 100);
+        if (flowType === 'in') {
+          yearlyNetCF[y] -= (amt - fee); // 成本基数 = 净投入（amount - fee）
         } else {
-          yearlyNetCF[y] += (amt - fee); // 投资者领取，现金流入（扣除手续费）
+          yearlyNetCF[y] += (amt - fee); // 领取 = 到账金额（已扣手续费）
         }
+      }
+
+      // 1) 自有资金流水
+      fundFlows.forEach(f => addFlow(f.date, f.flowType, f.amount, f.feeRate));
+      // 2) 年金转入：视为投资者投入，计入万能账户 IRR 成本基数
+      transferRecords.forEach(t => {
+        if (parseFloat(t.amount) > 0) addFlow(t.date, 'in', t.amount, t.feeRate || 0);
       });
 
-      // 构建现金流数组：year 0 = 0，每年末净现金流，末年加入账户价值
       const maxY = year;
-      const cashflows = [0];
-      for (let y = 1; y <= maxY; y++) {
-        cashflows.push(yearlyNetCF[y] || 0);
+      // 现金流数组：index = 保单年度（含第0年）
+      const cashflows = [];
+      for (let y = 0; y <= maxY; y++) cashflows.push(yearlyNetCF[y] || 0);
+
+      // 3) 手续费返还：计入现金流（按年归集，避免与终端账户价值重复）
+      //    终端值改用账户价值(=现金价值-累计返还)，返还作为独立正现金流，二者不重复
+      const cashValues = getFormCashValues() || [];
+      const cumFeeReturnByYear = {};
+      cashValues.forEach(cv => { cumFeeReturnByYear[cv.year] = parseFloat(cv._uaCumFeeReturn) || 0; });
+      let prevCum = 0;
+      for (let y = 0; y <= maxY; y++) {
+        const cum = cumFeeReturnByYear[y] || 0;
+        const ret = cum - prevCum;
+        if (ret > 0) cashflows[y] += ret;  // 手续费返还 = 现金流入
+        prevCum = cum;
       }
-      // 末年：净现金流 + 账户价值（退保可得）
-      cashflows[maxY] += selectedRow.cashValue || 0;
+      const terminalCumFeeReturn = cumFeeReturnByYear[maxY] || 0;
+      // 末年：账户价值（不含已返还手续费，因返还已单独计入）+ 当年净现金流
+      cashflows[maxY] += (selectedRow.cashValue || 0) - terminalCumFeeReturn;
 
       // Newton's method
       function npv(rate) {
@@ -1264,6 +1298,9 @@
     document.getElementById('cashValueColLabel').textContent = isAnnuity ? '现金价值-不含年金（元）' : '现金价值（元）';
     document.getElementById('batchPasteInput').disabled = isDisabled;
 
+    // 数字字段兜底：把 "-"、非法字符串等脏值清成空，避免 <input type="number"> 报解析错误
+    const safeNum = (v) => (v === '' || v === null || v === undefined) ? '' : (isFinite(Number(v)) ? v : '');
+
     let totalCols = 3; // year, cashValue, actions
     if (hasDividend) totalCols += 2; // dividend + distributed
     if (showManualAnnuity) totalCols += 1;
@@ -1276,12 +1313,12 @@
       const disabledAttr = isDisabled ? ' disabled' : '';
       body.innerHTML = cashValues.map((cv, i) => `
         <tr>
-          <td><input type="number" value="${cv.year || ''}" placeholder="${i+1}" min="1" onchange="updateCashValueField(${i},'year',this.value)"${disabledAttr}></td>
-          <td><input type="number" value="${cv.cashValue || ''}" placeholder="0" min="0" step="0.01" onchange="updateCashValueField(${i},'cashValue',this.value)"${disabledAttr}></td>
-          ${hasDividend ? `<td><input type="number" value="${cv.dividend || ''}" placeholder="0" min="0" step="0.01" onchange="updateCashValueField(${i},'dividend',this.value)"${disabledAttr}></td><td style="text-align:center;"><input type="checkbox" ${cv.distributed ? 'checked' : ''} onchange="updateCashValueField(${i},'distributed',this.checked)"${disabledAttr}></td>` : ''}
-          ${showManualAnnuity ? `<td><input type="number" value="${cv.annuityAmount || ''}" placeholder="0" min="0" step="0.01" onchange="updateCashValueField(${i},'annuityAmount',this.value)"${disabledAttr}></td>` : ''}
+          <td><input type="number" value="${safeNum(cv.year)}" placeholder="${i+1}" min="1" onchange="updateCashValueField(${i},'year',this.value)"${disabledAttr}></td>
+          <td><input type="number" value="${safeNum(cv.cashValue)}" placeholder="0" min="0" step="0.01" onchange="updateCashValueField(${i},'cashValue',this.value)"${disabledAttr}></td>
+          ${hasDividend ? `<td><input type="number" value="${safeNum(cv.dividend)}" placeholder="0" min="0" step="0.01" onchange="updateCashValueField(${i},'dividend',this.value)"${disabledAttr}></td><td style="text-align:center;"><input type="checkbox" ${cv.distributed ? 'checked' : ''} onchange="updateCashValueField(${i},'distributed',this.checked)"${disabledAttr}></td>` : ''}
+          ${showManualAnnuity ? `<td><input type="number" value="${safeNum(cv.annuityAmount)}" placeholder="0" min="0" step="0.01" onchange="updateCashValueField(${i},'annuityAmount',this.value)"${disabledAttr}></td>` : ''}
           ${showTransferToUA ? `<td style="text-align:center;"><input type="checkbox" ${cv.transferToUA ? 'checked' : ''} onchange="updateCashValueField(${i},'transferToUA',this.checked)"${disabledAttr}></td>` : ''}
-          ${hasOtherIncome ? `<td><input type="number" value="${cv.otherIncome || ''}" placeholder="0" min="0" step="0.01" onchange="updateCashValueField(${i},'otherIncome',this.value)"${disabledAttr}></td>` : ''}
+          ${hasOtherIncome ? `<td><input type="number" value="${safeNum(cv.otherIncome)}" placeholder="0" min="0" step="0.01" onchange="updateCashValueField(${i},'otherIncome',this.value)"${disabledAttr}></td>` : ''}
           <td>${isDisabled ? '' : `<button type="button" class="del-row-btn" onclick="removeCashValueRow(${i})" title="删除">×</button>`}</td>
         </tr>
       `).join('');
@@ -1298,12 +1335,15 @@
 
   function getTempCashValues() {
     try {
-      return JSON.parse(document.getElementById('cashValueBody').dataset.temp || '[]');
+      let v = JSON.parse(document.getElementById('cashValueBody').dataset.temp || '[]');
+      if (typeof v === 'string') v = JSON.parse(v); // 兼容双重编码残留
+      return Array.isArray(v) ? v : [];
     } catch(e) { return []; }
   }
 
   function setTempCashValues(arr) {
-    document.getElementById('cashValueBody').dataset.temp = JSON.stringify(arr);
+    const el = document.getElementById('cashValueBody');
+    el.dataset.temp = (typeof arr === 'string') ? arr : JSON.stringify(arr || []);
   }
 
   function addCashValueRow() {
@@ -1360,7 +1400,15 @@
       arr = getTempCashValues();
     }
     if (arr[index]) {
-      arr[index][field] = value;
+      const numericFields = ['year','cashValue','dividend','annuityAmount','otherIncome'];
+      if (numericFields.includes(field)) {
+        // 只保存合法数字或空；拦截单独的 "-" 等非法值，避免脏数据写入
+        arr[index][field] = (value === '' || value === null || value === undefined)
+          ? ''
+          : (isFinite(Number(value)) ? value : '');
+      } else {
+        arr[index][field] = value;
+      }
     }
     if (policy && policy.cashValues) {
       policy.cashValues = arr;
@@ -1664,6 +1712,70 @@
     }
   }
 
+  // 从年金险侧元数据（transferToUA + linkedUAPolicyId + cashValues）重建所有万能账户的 transferRecords。
+  // 用于导入数据后 / 系统启动时自愈，避免关联万能的转入记录丢失。
+  function syncAllTransferRecords() {
+    if (!Array.isArray(policies)) return;
+
+    const syncedAnnuityIds = new Set(); // 配置了"年金转入万能"的年金险 id（其转入记录以元数据为准重建）
+    const computedByUA = {};            // 万能险 id -> 由元数据计算出的转入记录数组
+
+    policies.forEach(p => {
+      if (p.universalAccount) return;   // 万能账户本身不转入
+      if (!p.transferToUA) return;      // 未配置转入：保留其原有记录，不动
+      syncedAnnuityIds.add(p.id);
+
+      if (!p.linkedUAPolicyId) return;  // 配置了转入但没选目标：无可写入的账户
+      const uaPolicy = policies.find(u => u.id === p.linkedUAPolicyId);
+      if (!uaPolicy || !uaPolicy.universalAccount) return; // 悬空引用：跳过，保留年金侧配置不动
+
+      const ua = uaPolicy.universalAccount;
+      if (!Array.isArray(ua.transferRecords)) ua.transferRecords = [];
+
+      const cv = Array.isArray(p.cashValues) ? p.cashValues : [];
+      const startDate = new Date(p.startDate);
+      if (isNaN(startDate.getTime())) return;
+      const sortedCV = [...cv]
+        .filter(c => c.transferToUA && parseFloat(c.annuityAmount) > 0)
+        .sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
+      const isMonthlyTransfer = p.isMonthlyPayout || false;
+      const transferred = [];
+      sortedCV.forEach(c => {
+        const year = parseInt(c.year) || 0;
+        const rawAmt = parseFloat(c.annuityAmount) || 0;
+        const transferDate = new Date(startDate);
+        transferDate.setFullYear(startDate.getFullYear() + year);
+        const amt = isMonthlyTransfer ? rawAmt * 12 : rawAmt;
+        transferred.push({
+          date: transferDate.toISOString().slice(0, 10),
+          sourcePolicyId: p.id,
+          sourcePolicyName: (p.company || '') + ' ' + (p.productName || ''),
+          amount: amt,
+          feeRate: 0,
+          returnType: 'none',
+          returnN: 0,
+          returnDate: ''
+        });
+      });
+      if (!computedByUA[p.linkedUAPolicyId]) computedByUA[p.linkedUAPolicyId] = [];
+      computedByUA[p.linkedUAPolicyId].push(...transferred);
+    });
+
+    // 重建每个万能账户的 transferRecords：丢弃来自"已配置转入的年金险"的旧记录（将由元数据重建），
+    // 保留其它来源（手动转入等无 sourcePolicyId 或来源未配置转入）的记录，再追加本次计算出的记录。
+    policies.forEach(p => {
+      if (!p.universalAccount) return;
+      const ua = p.universalAccount;
+      if (!Array.isArray(ua.transferRecords)) ua.transferRecords = [];
+      const kept = ua.transferRecords.filter(r => !r.sourcePolicyId || !syncedAnnuityIds.has(r.sourcePolicyId));
+      const appended = computedByUA[p.id] || [];
+      ua.transferRecords = [...kept, ...appended];
+      ua.transferRecords.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    });
+
+    saveData();
+  }
+
   function openDeleteConfirm(id) {
     deleteTargetId = id;
     document.getElementById('confirmModal').classList.add('active');
@@ -1705,6 +1817,7 @@
         if (Array.isArray(data)) {
           if (confirm(`确定要导入 ${data.length} 条保单数据吗？\n（将覆盖现有数据）`)) {
             policies = data;
+            syncAllTransferRecords(); // 导入后从年金险元数据重建万能账户转入记录
             saveData();
             renderStats();
             renderTable();

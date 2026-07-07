@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>保单管理工具 v20260706.1700</title>
+<title>保单管理工具 v20260707.1300</title>
 <link rel="stylesheet" href="insurance_CF.css">
 
 </head>
@@ -14,8 +14,9 @@
      <div class="header-left">
        <h1>📋 保单管理工具</h1>
        <div class="view-toggle">
-         <button class="btn" id="listViewBtn" onclick="switchView('list')">📋 列表</button>
-         <button class="btn" id="calendarViewBtn" onclick="switchView('calendar')">📅 日历</button>
+        <button class="btn" id="listViewBtn" onclick="switchView('list')">📋列表</button>
+        <button class="btn" id="waterfallViewBtn" onclick="switchView('waterfall')">📊瀑布</button>
+        <button class="btn" id="calendarViewBtn" onclick="switchView('calendar')">📅日历</button>
        </div>
        <button class="btn btn-primary" id="listAddBtn" style="margin-left:12px;" onclick="openAddModal()">+新增保单</button>
        <div class="view-toggle" id="calendarModeToggle" style="display:none; margin-left:12px;">
@@ -148,6 +149,12 @@
       <button class="btn btn-secondary btn-sm" id="nextMonthBtn">下月 ▶</button>
     </div>
     <div id="calendarGrid" style="display:grid; grid-template-columns:1fr; gap:24px;"></div>
+  </div>
+
+  <!-- 瀑布流视图 -->
+  <div id="waterfallView" style="display:none; background:white; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.05); padding:20px; margin-top:16px;">
+    <div class="wf-banner">可展示基准日期前 2 个月、后 4 个月的交费 / 领取计划</div>
+    <div id="waterfallList"></div>
   </div>
 </div>
 
@@ -607,78 +614,85 @@
           </div>
 
           <!-- 区块4: 结算利率表 -->
-          <div class="ua-section">
-            <div class="ua-section-title">📈 结算利率表（月度）</div>
-            <div style="font-size:12px; color:#6b7280; margin-bottom:8px;">每月填写当月的年化结算利率。未填写的月份将自动沿用最近一个已填写月份的利率。</div>
-            <table class="ua-table" id="uaInterestRatesTable">
-              <thead>
-                <tr>
-                  <th style="width:35%;">年月</th>
-                  <th style="width:35%;">年化结算利率（%）</th>
-                  <th style="width:30%;">操作</th>
-                </tr>
-              </thead>
-              <tbody id="uaIRBody"></tbody>
-            </table>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="addUAInterestRateRow()" style="margin-top:6px;">+ 新增月份</button>
-            <div class="ua-calc-result" id="uaCalcResult" style="display:none; margin-top:12px;"></div>
+          <div class="ua-section collapsed">
+            <div class="ua-section-title" onclick="toggleUASection(this)">📈 结算利率表（月度）</div>
+            <div class="ua-section-body">
+              <div style="font-size:12px; color:#6b7280; margin-bottom:8px;">每月填写当月的年化结算利率。未填写的月份将自动沿用最近一个已填写月份的利率。</div>
+              <table class="ua-table" id="uaInterestRatesTable">
+                <thead>
+                  <tr>
+                    <th style="width:35%;">年月</th>
+                    <th style="width:35%;">年化结算利率（%）</th>
+                    <th style="width:30%;">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="uaIRBody"></tbody>
+              </table>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="addUAInterestRateRow()" style="margin-top:6px;">+ 新增月份</button>
+              <div class="ua-calc-result" id="uaCalcResult" style="display:none; margin-top:12px;"></div>
+            </div>
           </div>
 
           <!-- 区块5: 年金转入明细 -->
-          <div class="ua-section" id="uaTransferSection" style="display:none;">
-            <div class="ua-section-title">📥 年金转入明细</div>
-            <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">
-              来自关联年金险的转入记录。转入金额 = 对应年金险年金金额，不可修改；手续费、返还方式可编辑。
+          <div class="ua-section collapsed" id="uaTransferSection" style="display:none;">
+            <div class="ua-section-title" onclick="toggleUASection(this)">📥 年金转入明细</div>
+            <div class="ua-section-body">
+              <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">
+                来自关联年金险的转入记录。转入金额 = 对应年金险年金金额，不可修改；手续费、返还方式可编辑。
+              </div>
+              <table class="ua-table" id="uaTransferTable">
+                <thead>
+                  <tr>
+                    <th style="width:14%;">转入日期</th>
+                    <th style="width:14%;">来源保单</th>
+                    <th style="width:12%;">转入金额（元）</th>
+                    <th style="width:10%;">手续费率%</th>
+                    <th style="width:14%;">返还方式</th>
+                    <th style="width:9%;">返还N年</th>
+                    <th style="width:16%;">返还日期</th>
+                    <th style="width:8%;">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="uaTransferBody"></tbody>
+              </table>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="addUATransferRow()" style="margin-top:8px;">+ 添加转入记录</button>
             </div>
-            <table class="ua-table" id="uaTransferTable">
-              <thead>
-                <tr>
-                  <th style="width:14%;">转入日期</th>
-                  <th style="width:14%;">来源保单</th>
-                  <th style="width:12%;">转入金额（元）</th>
-                  <th style="width:10%;">手续费率%</th>
-                  <th style="width:14%;">返还方式</th>
-                  <th style="width:9%;">返还N年</th>
-                  <th style="width:16%;">返还日期</th>
-                  <th style="width:8%;">操作</th>
-                </tr>
-              </thead>
-              <tbody id="uaTransferBody"></tbody>
-            </table>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="addUATransferRow()" style="margin-top:8px;">+ 添加转入记录</button>
           </div>
 
           <!-- 区块6: 资金出入流水表 -->
-          <div class="ua-section">
-            <div class="ua-section-title">💰 资金出入流水表</div>
-            <div style="font-size:12px; color:#6b7280; margin-bottom:8px;">
-              📥入 = 初始保费/追加申购 | 📤出 = 部分领取/赎回<br>
-              手续费率按每笔自填；返还日期 = 交易日期 + N年（精确到日）
+          <div class="ua-section collapsed">
+            <div class="ua-section-title" onclick="toggleUASection(this)">💰 资金出入流水表</div>
+            <div class="ua-section-body">
+              <div style="font-size:12px; color:#6b7280; margin-bottom:8px;">
+                📥入 = 初始保费/追加申购 | 📤出 = 部分领取/赎回<br>
+                手续费率按每笔自填；返还日期 = 交易日期 + N年（精确到日）
+              </div>
+              <table class="ua-table" id="uaFundFlowTable">
+                <thead>
+                  <tr>
+                    <th style="width:13%;">日期</th>
+                    <th style="width:8%;">类型</th>
+                    <th style="width:14%;">金额（元）</th>
+                    <th style="width:10%;">手续费率%</th>
+                    <th style="width:14%;">返还方式</th>
+                    <th style="width:9%;">返还N年</th>
+                    <th style="width:16%;">返还日期</th>
+                    <th style="width:8%;">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="uaFFBody"></tbody>
+              </table>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="addUAFundFlowRow()" style="margin-top:8px;">+ 新增资金记录</button>
+              <button type="button" class="btn btn-primary btn-sm" onclick="recalcUAAccount()" style="margin-top:6px;margin-left:6px;">🔄 重新计算账户价值</button>
             </div>
-            <table class="ua-table" id="uaFundFlowTable">
-              <thead>
-                <tr>
-                  <th style="width:13%;">日期</th>
-                  <th style="width:8%;">类型</th>
-                  <th style="width:14%;">金额（元）</th>
-                  <th style="width:10%;">手续费率%</th>
-                  <th style="width:14%;">返还方式</th>
-                  <th style="width:9%;">返还N年</th>
-                  <th style="width:16%;">返还日期</th>
-                  <th style="width:8%;">操作</th>
-                </tr>
-              </thead>
-              <tbody id="uaFFBody"></tbody>
-            </table>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="addUAFundFlowRow()" style="margin-top:8px;">+ 新增资金记录</button>
-            <button type="button" class="btn btn-primary btn-sm" onclick="recalcUAAccount()" style="margin-top:6px;margin-left:6px;">🔄 重新计算账户价值</button>
           </div>
 
           
 
           <!-- 区块7: 年度账户价值结果 -->
-          <div class="ua-section" id="uaResultSection" style="display:none;">
-            <div class="ua-section-title">📋 账户价值演示结果</div>
+          <div class="ua-section collapsed" id="uaResultSection" style="display:none;">
+            <div class="ua-section-title" onclick="toggleUASection(this)">📋 账户价值演示结果</div>
+            <div class="ua-section-body">
             <div style="max-height:300px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;">
               <table class="ua-table" id="uaResultTable">
                 <thead>
@@ -702,6 +716,7 @@
             <div id="uaSyncContainer" style="display:flex;align-items:center;gap:12px;margin-top:10px;flex-wrap:wrap;">
               <button type="button" class="btn btn-secondary btn-sm" onclick="syncUAToCashValues()">📥 同步到现金价值表</button>
               <label style="font-size:12px;color:#6b7280;">同步后可在「利益演示」页查看图表和IRR</label>
+            </div>
             </div>
           </div>
 
