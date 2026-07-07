@@ -42,6 +42,7 @@
         calendarMonth = baseDate.getMonth();
         renderCalendar();
       }
+      if (currentView === 'waterfall') renderWaterfall();
     });
     renderStats();
     renderTable();
@@ -125,6 +126,7 @@
     const btn = document.getElementById('toggleAmountBtn');
     btn.textContent = showAmounts ? '👁️显示金额' : '🙈隐藏金额';
     renderStats();
+    if (currentView === 'waterfall') renderWaterfall();
     renderTable();
   }
   // ========== 日历视图相关 ==========
@@ -137,24 +139,194 @@
     document.getElementById('modeAllBtn').classList.toggle('active', mode === 'all');
     document.getElementById('modePaymentBtn').classList.toggle('active', mode === 'payment');
     document.getElementById('modePayoutBtn').classList.toggle('active', mode === 'payout');
+    if (currentView === 'waterfall') renderWaterfall();
     renderCalendar();
   }
 
   function switchView(view) {
+    const prevView = currentView;
     currentView = view;
     document.getElementById('listViewBtn').classList.toggle('active', view === 'list');
     document.getElementById('calendarViewBtn').classList.toggle('active', view === 'calendar');
+    document.getElementById('waterfallViewBtn').classList.toggle('active', view === 'waterfall');
     document.querySelector('.table-wrapper').style.display = view === 'list' ? 'block' : 'none';
     document.getElementById('calendarView').style.display = view === 'calendar' ? 'block' : 'none';
-    // 列表视图显示新增按钮，日历视图显示模式切换
+    document.getElementById('waterfallView').style.display = view === 'waterfall' ? 'block' : 'none';
+    // 列表视图显示新增按钮，日历/瀑布流视图显示模式切换
     document.getElementById('listAddBtn').style.display = view === 'list' ? 'inline-flex' : 'none';
-    document.getElementById('calendarModeToggle').style.display = view === 'calendar' ? 'inline-flex' : 'none';
+    document.getElementById('calendarModeToggle').style.display = (view === 'calendar' || view === 'waterfall') ? 'inline-flex' : 'none';
+    // 从列表视图切换到日历/瀑布流时，默认选择「缴费及领取」；日历⇄瀑布流切换则保持原筛选不变
+    if (prevView === 'list' && (view === 'calendar' || view === 'waterfall')) {
+      calendarMode = 'all';
+      document.getElementById('modeAllBtn').classList.add('active');
+      document.getElementById('modePaymentBtn').classList.remove('active');
+      document.getElementById('modePayoutBtn').classList.remove('active');
+    }
     if (view === 'calendar') {
       const base = baseDate || new Date();
       calendarYear = base.getFullYear();
       calendarMonth = base.getMonth();
       renderCalendar();
+    } else if (view === 'waterfall') {
+      renderWaterfall();
     }
+  }
+
+  // ========== 瀑布流视图相关 ==========
+  function renderWaterfall() {
+    const container = document.getElementById('waterfallList');
+    const base = baseDate || new Date();
+    // 基准日期前 2 个月 ~ 后 4 个月（共 7 个月）
+    const baseMonthDate = new Date(base.getFullYear(), base.getMonth(), 1);
+    const months = [];
+    for (let i = -2; i <= 4; i++) {
+      const d = new Date(baseMonthDate.getFullYear(), baseMonthDate.getMonth() + i, 1);
+      months.push({ year: d.getFullYear(), month: d.getMonth() });
+    }
+
+    const amtStr = (v) => showAmounts ? formatMoney(v) : '***';
+    const benefitModeEl = document.getElementById('colBenefitMode');
+    const benefitMode = benefitModeEl ? benefitModeEl.value : 'total';
+    const modeLabels = { total:'保单总利益', cashValue:'现金价值', annuity:'累计年金', dividend:'累计红利', maturity:'满期金', otherIncome:'保单其他收入', totalWithOther:'总利益（含）' };
+    const benefitLabel = modeLabels[benefitMode] || '总利益（不含其他）';
+    const filteredForBenefit = getFilteredPolicies().filter(p => !p.excludedFromSummary);
+
+    container.innerHTML = '';
+
+    months.forEach((mo) => {
+      const monthStart = new Date(mo.year, mo.month, 1);
+      const monthEnd = new Date(mo.year, mo.month + 1, 0, 23, 59, 59);
+      const events = generateEvents(monthStart, monthEnd);
+
+      // 聚合统计
+      const summary = {};
+      events.forEach(ev => {
+        if (!summary[ev.type]) summary[ev.type] = { count: 0, total: 0 };
+        summary[ev.type].count++;
+        summary[ev.type].total += (ev.amount || 0);
+      });
+      // 缴费：仅统计"缴费日"，不含宽限期
+      if (summary['缴费日']) { summary['缴费'] = summary['缴费日']; delete summary['缴费日']; }
+      delete summary['宽限期'];
+
+      const isCurrent = (mo.year === base.getFullYear() && mo.month === base.getMonth());
+      const next = new Date(base.getFullYear(), base.getMonth() + 1, 1);
+      const isNext = (mo.year === next.getFullYear() && mo.month === next.getMonth());
+      const expanded = isCurrent;
+
+      // 月底生存总利益
+      let benefitTotal = 0;
+      filteredForBenefit.forEach(p => {
+        const comp = calcBenefitComponentsAtDate(p, monthEnd);
+        if (!comp) return;
+        switch (benefitMode) {
+          case 'cashValue': benefitTotal += comp.cashValue; break;
+          case 'dividend': benefitTotal += comp.dividend; break;
+          case 'annuity': benefitTotal += comp.cumAnnuity; break;
+          case 'maturity': benefitTotal += comp.maturityAmt; break;
+          case 'otherIncome': benefitTotal += comp.cumOtherIncome; break;
+          case 'totalWithOther': benefitTotal += Math.round((comp.isMatured ? comp.maturityAmt : comp.cashValue) + comp.dividend + comp.cumAnnuity + comp.cumOtherIncome); break;
+          default: benefitTotal += Math.round((comp.isMatured ? comp.maturityAmt : comp.cashValue) + comp.dividend + comp.cumAnnuity);
+        }
+      });
+
+      const card = document.createElement('div');
+      card.className = 'wf-month-card' + (isCurrent ? ' current' : '');
+
+      // 头部（可点击展开/收起）
+      const header = document.createElement('div');
+      header.className = 'wf-month-header';
+      header.innerHTML = `<span class="wf-month-title">${mo.year}年${String(mo.month + 1).padStart(2, '0')}月</span><span class="wf-toggle-icon">${expanded ? '▼' : '▶'}</span>`;
+      card.appendChild(header);
+
+      // 摘要行（折叠时也显示）：当月用实心圆点<i>，其他月份用"·"
+      const bullet = isCurrent
+        ? '<i style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#111827;margin-right:5px;vertical-align:middle;"></i>'
+        : '· ';
+      const summaryParts = [];
+      const typeConfig = {
+        '缴费': { label: '缴费' },
+        '年金领取': { label: '年金领取' },
+        '满期日': { label: '满期' },
+        '退保': { label: '退保' }
+      };
+      for (const [type, cfg] of Object.entries(typeConfig)) {
+        if (summary[type] && summary[type].count > 0) {
+          const amtTxt = amtStr(summary[type].total);
+          summaryParts.push(`<span style="color:#111827;font-size:13px;margin-right:10px;">${bullet}${cfg.label} ${summary[type].count}份/¥${amtTxt}</span>`);
+        }
+      }
+      summaryParts.push(`<span style="color:#111827;font-size:13px;margin-right:10px;">${bullet}月底 ${benefitLabel} ¥${amtStr(benefitTotal)}</span>`);
+      const summaryDiv = document.createElement('div');
+      summaryDiv.className = 'wf-summary';
+      summaryDiv.innerHTML = summaryParts.join('');
+      card.appendChild(summaryDiv);
+
+      // 详情区
+      const body = document.createElement('div');
+      body.className = 'wf-month-body';
+      body.style.display = expanded ? 'block' : 'none';
+
+      const evs = events;
+      const sortByDate = (arr) => arr.slice().sort((a, b) => a.date - b.date);
+      const paymentEvents = evs.filter(e => e.type === '缴费日');
+      const graceEvents   = evs.filter(e => e.type === '宽限期');
+      const payoutEvents  = evs.filter(e => e.type === '年金领取');
+      const statusEvents  = evs.filter(e => e.type === '满期日' || e.type === '退保');
+
+      const makeEventItem = (ev) => {
+        const item = document.createElement('div');
+        item.className = 'wf-event-item';
+        if (ev.type === '缴费日' || ev.type === '宽限期') { item.style.background = '#eff6ff'; item.style.color = '#1e40af'; }
+        else if (ev.type === '年金领取' || ev.type === '满期日') { item.style.background = '#ecfdf5'; item.style.color = '#065f46'; }
+        else if (ev.type === '退保') { item.style.background = '#fef2f2'; item.style.color = '#dc2626'; }
+        let lbl = ev.label;
+        if (ev.amount) lbl += showAmounts ? ` ¥${formatMoney(ev.amount)}` : ' ¥***';
+        item.textContent = lbl;
+        return item;
+      };
+
+      // 所有月份展开后统一使用 1:1:1 三栏网格（含产品明细）
+      const grid = document.createElement('div');
+      grid.className = 'wf-grid-3';
+
+      const makeColumn = (title, evsList) => {
+        const col = document.createElement('div');
+        col.className = 'wf-col' + (evsList.length === 0 ? ' wf-col--empty' : '');
+        const total = evsList.reduce((s, e) => s + (e.amount || 0), 0);
+        const head = document.createElement('div');
+        head.className = 'wf-col-head';
+        head.innerHTML = `<span class="wf-col-title">${title}</span>` +
+          `<span class="wf-col-meta">${evsList.length}项 · ¥${amtStr(total)}</span>`;
+        col.appendChild(head);
+        const list = document.createElement('div');
+        list.className = 'wf-col-list';
+        if (evsList.length) {
+          sortByDate(evsList).forEach(ev => list.appendChild(makeEventItem(ev)));
+        } else {
+          const empty = document.createElement('div');
+          empty.className = 'wf-col-empty';
+          empty.textContent = '无';
+          list.appendChild(empty);
+        }
+        col.appendChild(list);
+        return col;
+      };
+
+      grid.appendChild(makeColumn('缴费 / 宽限期', [...sortByDate(paymentEvents), ...sortByDate(graceEvents)]));
+      grid.appendChild(makeColumn('领取', sortByDate(payoutEvents)));
+      grid.appendChild(makeColumn('满期 / 退保', sortByDate(statusEvents)));
+      body.appendChild(grid);
+
+      header.onclick = () => {
+        const isHidden = body.style.display === 'none';
+        body.style.display = isHidden ? 'block' : 'none';
+        header.querySelector('.wf-toggle-icon').textContent = isHidden ? '▼' : '▶';
+      };
+
+      card.appendChild(body);
+      container.appendChild(card);
+    });
   }
 
   function changeCalendarMonth(delta) {
@@ -336,7 +508,7 @@
     }
 
     const monthNames = ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
-    title.textContent = `${monthNames[months[0].month]} ${months[0].year}  —  ${monthNames[months[1].month]} ${months[1].year}`;
+    title.textContent = `${months[0].year}年${String(months[0].month + 1).padStart(2, '0')}月 — ${months[1].year}年${String(months[1].month + 1).padStart(2, '0')}月`;
 
     const startDate = new Date(months[0].year, months[0].month, 1);
     const endDate = new Date(months[1].year, months[1].month + 1, 0);
@@ -352,7 +524,7 @@
       monthTitle.style.textAlign = 'center';
       monthTitle.style.fontWeight = '600';
       monthTitle.style.marginBottom = '4px';
-      monthTitle.textContent = `${monthNames[m.month]} ${m.year}`;
+      monthTitle.textContent = `${m.year}年${String(m.month + 1).padStart(2, '0')}月`;
       monthDiv.appendChild(monthTitle);
 
       // 当月现金流合计
@@ -373,11 +545,12 @@
       delete summary['宽限期'];
       const summaryParts = [];
       const typeConfig = {
+        '缴费': { color: '#1e40af', bg: '#eff6ff' },
         '年金领取': { color: '#065f46', bg: '#ecfdf5' },
         '满期日': { color: '#065f46', bg: '#ecfdf5', label: '满期' },
-        '退保': { color: '#dc2626', bg: '#fef2f2' },
-        '缴费': { color: '#1e40af', bg: '#eff6ff' }
+        '退保': { color: '#dc2626', bg: '#fef2f2' }
       };
+      // 顺序：缴费类型在前，领取类型其次，月底总利益在末尾
       for (const [type, cfg] of Object.entries(typeConfig)) {
         if (summary[type] && summary[type].count > 0) {
           const label = cfg.label || type;
@@ -656,6 +829,7 @@
           }
           return p;
         });
+        syncAllTransferRecords(); // 启动加载后，从年金险元数据自愈万能账户转入记录
       } catch (e) {
         policies = [];
       }
@@ -741,6 +915,21 @@
     if (statuses.length === 0) statuses.push('待确认');
     return statuses;
   }
+  function getPremiumDueDeadline(policy, baseDate) {
+    if (!policy.startDate || !policy.paymentTerm) return null;
+    const start = new Date(policy.startDate);
+    if (isNaN(start.getTime())) return null;
+    const term = parseInt(policy.paymentTerm);
+    if (isNaN(term)) return null;
+    const paid = calcPaidYears(policy.startDate, policy.paymentTerm, baseDate);
+    if (paid >= term) return null; // 已缴清，不再提示
+    const due = new Date(start);
+    due.setFullYear(due.getFullYear() + paid); // 当期保费到期日(保单周年日)
+    const deadline = new Date(due);
+    deadline.setDate(deadline.getDate() + 60); // 宽限期 +60天
+    if (baseDate >= due && baseDate <= deadline) return deadline;
+    return null;
+  }
   function renderStatusTags(policy, baseDate) {
     const statuses = calcPolicyStatus(policy, baseDate);
     const shortMap = { '交费中': '交', '缴清': '清', '年金领取': '金', '满期': '满', '退保': '退' };
@@ -749,12 +938,21 @@
       if (s.startsWith('费')) {
         return `<span class="tag" style="background:#fef3c7;color:#92400e;margin:0 1px;" title="退保手续费${s.replace('费','')}%">${s}</span>`;
       }
+      // 交费中且在应缴窗口(到期日~到期日+60天宽限期) → 红体粗体提示交保费
+      if (s === '交费中') {
+        const deadline = getPremiumDueDeadline(policy, baseDate);
+        if (deadline) {
+          const dl = `${deadline.getFullYear()}-${String(deadline.getMonth() + 1).padStart(2, '0')}-${String(deadline.getDate()).padStart(2, '0')}`;
+          return `<span class="tag tag-status-paydue" style="margin:0 1px;" title="请交保费！宽限期至 ${dl}">交</span>`;
+        }
+      }
       return `<span class="tag tag-status-${s}" style="margin:0 1px;" title="${s}">${shortMap[s] || s}</span>`;
     }).join('');
   }
   function renderStats(filteredList) {
-    let data = filteredList !== undefined ? filteredList : policies;
-    data = data.filter(p => !p.excludedFromSummary);
+    const baseData = filteredList !== undefined ? filteredList : policies;
+    const excludedCount = baseData.filter(p => p.excludedFromSummary).length;
+    let data = baseData.filter(p => !p.excludedFromSummary);
     const today = baseDate;
     today.setHours(0, 0, 0, 0);
     const activeData = data.filter(p => isPolicyActive(p, today));
@@ -819,7 +1017,7 @@
       <div class="stats-row-5">
         <div class="stat-card">
           <div class="stat-label">保单总数</div>
-          <div class="stat-value" >${totalAll} 份 / <span style="color:#059669;">有效 ${total}</span></div>
+          <div class="stat-value" >${totalAll} 份 / <span style="color:#059669;">有效 ${total}</span> / <span style="color:#9ca3af;font-size:14px;">另不计入 ${excludedCount}</span></div>
         </div>
         <div class="stat-card">
           <div class="stat-label">保单状态分布</div>

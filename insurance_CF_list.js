@@ -6,6 +6,7 @@
     if (filtered.length === 0) {
       tbody.innerHTML = '';
       emptyState.style.display = 'block';
+      if (currentView === 'waterfall') renderWaterfall();
       return;
     }
 
@@ -24,7 +25,7 @@
         valB = formatCoverage(b);
       } else if (sortField === 'cumulativePremium') {
         valA = (parseFloat(a.annualPremium) || 0) * calcPaidYears(a.startDate, a.paymentTerm);
-        valB = (parseFloat(b.annualPremium) || 0) * calcPaidYears(b.startDate, a.paymentTerm);
+        valB = (parseFloat(b.annualPremium) || 0) * calcPaidYears(b.startDate, b.paymentTerm);
       } else {
         valA = a[sortField];
         valB = b[sortField];
@@ -81,4 +82,5 @@
     renderStats(filtered);
     updateFilterCounts();
     if (currentView === 'calendar') renderCalendar();
+    if (currentView === 'waterfall') renderWaterfall();
   }

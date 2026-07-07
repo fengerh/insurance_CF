@@ -377,6 +377,7 @@
   function renderUAResult(result) {
     if (!result || result.annualRows.length === 0) return;
     document.getElementById('uaResultSection').style.display = 'block';
+    document.getElementById('uaResultSection').classList.remove('collapsed');
     document.getElementById('uaResultBody').innerHTML = result.annualRows.map(r => `
       <tr>
         <td>${r.year}</td>
@@ -417,7 +418,7 @@
     }));
     policy.cashValueImported = true;
     saveData();
-    setTempCashValues(JSON.stringify(policy.cashValues));
+    setTempCashValues(policy.cashValues);
     updateCashValueTable();
     renderTable();
     document.getElementById('cashValueImported').checked = true;
@@ -604,6 +605,18 @@
       loadUADataToForm(policy);
     }
   };
+  function clearUAForm() {
+    ['uaIRBody', 'uaFFBody', 'uaRiskFeeBody', 'uaCoefficientBody', 'uaTransferBody'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '';
+    });
+    const resultSec = document.getElementById('uaResultSection');
+    if (resultSec) resultSec.style.display = 'none';
+    const calcRes = document.getElementById('uaCalcResult');
+    if (calcRes) calcRes.style.display = 'none';
+    const prompt = document.getElementById('uaEditPrompt');
+    if (prompt) prompt.remove();
+  }
   function loadUADataToForm(policy) {
     const ua = policy.universalAccount || {};
     // Basic params
@@ -691,6 +704,7 @@
       addUATransferRow(t);
     });
     document.getElementById('uaTransferSection').style.display = 'block';
+    document.getElementById('uaTransferSection').classList.remove('collapsed');
 
     // Cached result
     if (_uaCache[policy.id]) {
