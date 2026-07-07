@@ -1041,6 +1041,23 @@
       }
     });
 
+    // 万能账户：基于基准日期，当年资金出入流水表 入 - 出，累加进"当年累计已交"
+    // 投入(入)按扣手续费前金额计；提出(出)按扣手续费后(含手续费)金额计
+    // 仅统计 fundFlows（年金转入明细 transferRecords 不计入）
+    activeData.forEach(p => {
+      if (!p.universalAccount || !p.universalAccount.fundFlows) return;
+      p.universalAccount.fundFlows.forEach(f => {
+        if (!f.date || isNaN(new Date(f.date).getTime())) return;
+        const fDate = new Date(f.date);
+        fDate.setHours(0, 0, 0, 0);                   // 归一到当地零点，按日期精确比较
+        if (fDate.getFullYear() !== currentYear || fDate > today) return; // 只统计 基准日期同年 且 日期<=基准日的流水
+        const amt = parseFloat(f.amount) || 0;
+        const fee = amt * (parseFloat(f.feeRate) || 0) / 100;
+        if (f.flowType === 'out') paidAmount -= (amt + fee); // 出：扣手续费后(含费)
+        else paidAmount += amt;                              // 入：扣手续费前
+      });
+    });
+
     document.getElementById('stats').innerHTML = `
       <div class="stats-row-5">
         <div class="stat-card">
