@@ -82,9 +82,16 @@
       </td>
       <td><input type="number" value="${returnN || ''}" placeholder="N" min="1" onchange="updateUAReturnDate(this.closest('tr'))"></td>
       <td><input type="date" value="${returnDate !== '-' ? returnDate : ''}" min="1900-01-01" max="2100-12-31" style="font-size:11px;"></td>
-      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
+      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove();updateUACounts()">×</button></td>
     `;
     tbody.appendChild(tr);
+    updateUACounts();
+    // 添加记录后确保区块可见并展开，避免折叠状态下看不到新行
+    const sec = document.getElementById('uaFundFlowSection');
+    if (sec) {
+      sec.style.display = 'block';
+      sec.classList.remove('collapsed');
+    }
   }
 
   function calcReturnDate(date, years) {
@@ -444,6 +451,18 @@
     tbody.appendChild(tr);
   }
 
+  function updateUACounts() {
+    const setC = (id, bodyId) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const n = document.querySelectorAll('#' + bodyId + ' tr').length;
+      el.textContent = '共' + n + '条';
+    };
+    setC('uaIRCount', 'uaIRBody');
+    setC('uaTransferCount', 'uaTransferBody');
+    setC('uaFFCount', 'uaFFBody');
+  }
+
   function addUAInterestRateRow() {
     const tbody = document.getElementById('uaIRBody');
     const tr = document.createElement('tr');
@@ -452,9 +471,10 @@
     tr.innerHTML = `
       <td><input type="month" value="${monthStr}"></td>
       <td><input type="number" value="3.50" placeholder="3.50" min="0" max="20" step="0.01"></td>
-      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
+      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove();updateUACounts()">×</button></td>
     `;
     tbody.appendChild(tr);
+    updateUACounts();
   }
 
   function addUARiskFeeRow() {
@@ -616,6 +636,7 @@
     if (calcRes) calcRes.style.display = 'none';
     const prompt = document.getElementById('uaEditPrompt');
     if (prompt) prompt.remove();
+    updateUACounts();
   }
   function loadUADataToForm(policy) {
     const ua = policy.universalAccount || {};
@@ -639,7 +660,7 @@
       tr.innerHTML = `
         <td><input type="month" value="${ir.yearMonth || ''}"></td>
         <td><input type="number" value="${ir.rate !== undefined ? ir.rate : ''}" placeholder="3.50" min="0" max="20" step="0.01"></td>
-        <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
+        <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove();updateUACounts()">×</button></td>
       `;
       document.getElementById('uaIRBody').appendChild(tr);
     });
@@ -666,6 +687,14 @@
         lastRow.querySelectorAll('td')[7].innerHTML = '<span style="font-size:11px;color:#9ca3af;">初始</span>';
       }
     });
+
+    document.getElementById('uaFundFlowSection').style.display = 'block';
+    // 有资金流水记录才展开，无内容则默认折叠
+    if (ffArr.length > 0) {
+      document.getElementById('uaFundFlowSection').classList.remove('collapsed');
+    } else {
+      document.getElementById('uaFundFlowSection').classList.add('collapsed');
+    }
 
     // Risk fee table
     document.getElementById('uaRiskFeeBody').innerHTML = '';
@@ -704,7 +733,12 @@
       addUATransferRow(t);
     });
     document.getElementById('uaTransferSection').style.display = 'block';
-    document.getElementById('uaTransferSection').classList.remove('collapsed');
+    // 有转入记录才展开，无内容则默认折叠
+    if (trArr.length > 0) {
+      document.getElementById('uaTransferSection').classList.remove('collapsed');
+    } else {
+      document.getElementById('uaTransferSection').classList.add('collapsed');
+    }
 
     // Cached result
     if (_uaCache[policy.id]) {
@@ -716,6 +750,7 @@
     // Always ensure UA content is visible when loading data
     document.getElementById('uaNonUniversal').style.display = 'none';
     document.getElementById('uaContent').style.display = 'block';
+    updateUACounts();
   }
 
   // 反向查找关联的年金险，在万能险侧显示对方（年金险）名字。

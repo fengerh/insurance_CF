@@ -436,9 +436,14 @@
       </td>
       <td><input type="number" value="${d.returnN || ''}" placeholder="N" min="1" onchange="updateUAReturnDate(this.closest('tr'))"></td>
       <td><input type="date" value="${d.returnDate || ''}" min="1900-01-01" max="2100-12-31" style="font-size:11px;"></td>
-      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
+      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove();updateUACounts()">×</button></td>
     `;
     tbody.appendChild(tr);
+    updateUACounts();
+    // 添加记录后确保区块可见并展开，避免折叠状态下看不到新行
+    const sec = document.getElementById('uaTransferSection');
+    sec.style.display = 'block';
+    sec.classList.remove('collapsed');
   }
 
   function getUATransferData() {

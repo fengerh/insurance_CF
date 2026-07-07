@@ -936,6 +936,12 @@
   .ua-section.collapsed .ua-section-title::after {
     content: ' \25BC';
   }
+  .ua-count {
+    font-size: 12px;
+    font-weight: 600;
+    color: #4f46e5;
+    margin-left: 8px;
+  }
   .ua-section.collapsed .ua-section-body {
     display: none !important;
   }

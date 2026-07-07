@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>保单管理工具 v20260707.1449</title>
+<title>保单管理工具 v20260707.1600</title>
 <link rel="stylesheet" href="insurance_CF.css">
 
 </head>
@@ -615,7 +615,7 @@
 
           <!-- 区块4: 结算利率表 -->
           <div class="ua-section collapsed">
-            <div class="ua-section-title" onclick="toggleUASection(this)">📈 结算利率表（月度）</div>
+            <div class="ua-section-title" onclick="toggleUASection(this)">📈 结算利率表（月度）<span class="ua-count" id="uaIRCount">共0条</span></div>
             <div class="ua-section-body">
               <div style="font-size:12px; color:#6b7280; margin-bottom:8px;">每月填写当月的年化结算利率。未填写的月份将自动沿用最近一个已填写月份的利率。</div>
               <table class="ua-table" id="uaInterestRatesTable">
@@ -635,7 +635,7 @@
 
           <!-- 区块5: 年金转入明细 -->
           <div class="ua-section collapsed" id="uaTransferSection" style="display:none;">
-            <div class="ua-section-title" onclick="toggleUASection(this)">📥 年金转入明细</div>
+            <div class="ua-section-title" onclick="toggleUASection(this)">📥 年金转入明细<span class="ua-count" id="uaTransferCount">共0条</span></div>
             <div class="ua-section-body">
               <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">
                 来自关联年金险的转入记录。转入金额 = 对应年金险年金金额，不可修改；手续费、返还方式可编辑。
@@ -660,8 +660,8 @@
           </div>
 
           <!-- 区块6: 资金出入流水表 -->
-          <div class="ua-section collapsed">
-            <div class="ua-section-title" onclick="toggleUASection(this)">💰 资金出入流水表</div>
+          <div class="ua-section collapsed" id="uaFundFlowSection" style="display:none;">
+            <div class="ua-section-title" onclick="toggleUASection(this)">💰 资金出入流水表<span class="ua-count" id="uaFFCount">共0条</span></div>
             <div class="ua-section-body">
               <div style="font-size:12px; color:#6b7280; margin-bottom:8px;">
                 📥入 = 初始保费/追加申购 | 📤出 = 部分领取/赎回<br>
