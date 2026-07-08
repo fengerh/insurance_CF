@@ -1,12 +1,63 @@
   // ===== 万能账户计算引擎 =====
   let _uaCache = {}; // { policyId: { annualRows: [...], summary } }
-  function handleUAFieldChange() { /* placeholder - users can recalc via button */ }
+  let _uaRecalcTimer = null; // 自动重算防抖定时器
+
+  // 静默重算：返回 result 或 null（数据不完整时返回 null，不弹窗）
+  function recalcUAAccountSilent() {
+    const policy = getCurrentFormPolicy();
+    if (!policy || policy.designType !== '万能型') return null;
+    const config = getUAConfig();
+    config.riskFeeTable = getUARiskFeeTable();
+    config.coefficientTable = getUACoefficientTable();
+    const interestRates = getUAInterestRates();
+    let fundFlows = getUAFundFlowData();
+    const transferRecords = getUATransferData();
+    transferRecords.forEach(t => {
+      if (t.amount > 0) {
+        fundFlows.push({ date: t.date, flowType: 'in', amount: t.amount, feeRate: t.feeRate, returnType: t.returnType, returnN: t.returnN, returnDate: t.returnDate, source: 'annuityTransfer' });
+      }
+    });
+    fundFlows.sort((a, b) => a.date.localeCompare(b.date));
+    if (interestRates.length === 0 || fundFlows.length === 0) return null;
+    const result = calcUAAccount(interestRates, fundFlows, config, policy);
+    _uaCache[policy.id] = result;
+    return result;
+  }
+
+  // 改任意输入即自动重算（防抖 400ms，仅刷新演示表，不弹窗）
+  function handleUAFieldChange() {
+    if (_uaRecalcTimer) clearTimeout(_uaRecalcTimer);
+    _uaRecalcTimer = setTimeout(() => {
+      const result = recalcUAAccountSilent();
+      if (result) renderUAResult(result);
+    }, 400);
+  }
   function toggleUASection(titleEl) {
     const section = titleEl.closest('.ua-section');
     if (section) {
       section.classList.toggle('collapsed');
     }
   }
+
+  // 每次打开万能tab重置折叠：仅年金转入/资金流水/账户价值演示按"有内容"展开，其余一律强制折叠（不持久化）
+  function resetUASectionCollapse(policy) {
+    document.querySelectorAll('#panelUniversalAccount .ua-section').forEach(s => s.classList.add('collapsed'));
+    const transferSec = document.getElementById('uaTransferSection');
+    const ffSec = document.getElementById('uaFundFlowSection');
+    const resultSec = document.getElementById('uaResultSection');
+    const hasTransfer = document.querySelectorAll('#uaTransferBody tr').length > 0;
+    const hasFF = document.querySelectorAll('#uaFFBody tr').length > 0;
+    const hasResult = !!(policy && _uaCache[policy.id]);
+    if (hasTransfer && transferSec && transferSec.style.display !== 'none') transferSec.classList.remove('collapsed');
+    if (hasFF && ffSec && ffSec.style.display !== 'none') ffSec.classList.remove('collapsed');
+    if (hasResult && resultSec) {
+      resultSec.style.display = 'block';
+      resultSec.classList.remove('collapsed');
+    } else if (resultSec) {
+      resultSec.style.display = 'none';
+    }
+  }
+
   
   function getUAConfig() {
     return {
@@ -64,25 +115,25 @@
     const tr = document.createElement('tr');
     const returnDate = date && returnType === 'afterN' && returnN > 0 && amount > 0 ? calcReturnDate(date, returnN) : (returnType === 'immediate' && date ? date : '-');
     tr.innerHTML = `
-      <td><input type="date" value="${date || ''}" min="1900-01-01" max="2100-12-31" onchange="updateUAReturnDate(this.closest('tr'))"></td>
+      <td><input type="date" value="${date || ''}" min="1900-01-01" max="2100-12-31" onchange="updateUAReturnDate(this.closest('tr'));handleUAFieldChange()"></td>
       <td>
-        <select onchange="updateUAReturnDate(this.closest('tr'))">
+        <select onchange="updateUAReturnDate(this.closest('tr'));handleUAFieldChange()">
           <option value="in" ${type === 'in' ? 'selected' : ''}>📥入</option>
           <option value="out" ${type === 'out' ? 'selected' : ''}>📤出</option>
         </select>
       </td>
-      <td><input type="number" value="${amount || ''}" placeholder="0" min="0" step="0.01" onchange="updateUAReturnDate(this.closest('tr'))"></td>
-      <td><input type="number" value="${feeRate !== undefined ? feeRate : '2'}" placeholder="0" min="0" max="100" step="0.01"></td>
+      <td><input type="number" value="${amount || ''}" placeholder="0" min="0" step="0.01" onchange="updateUAReturnDate(this.closest('tr'));handleUAFieldChange()"></td>
+      <td><input type="number" value="${feeRate !== undefined ? feeRate : '2'}" placeholder="0" min="0" max="100" step="0.01" onchange="handleUAFieldChange()"></td>
       <td>
-        <select onchange="updateUAReturnDate(this.closest('tr'))">
+        <select onchange="updateUAReturnDate(this.closest('tr'));handleUAFieldChange()">
           <option value="none" ${returnType === 'none' ? 'selected' : ''}>不返还</option>
           <option value="afterN" ${returnType === 'afterN' ? 'selected' : ''}>满N年后返还</option>
           <option value="immediate" ${returnType === 'immediate' ? 'selected' : ''}>立即返还</option>
         </select>
       </td>
-      <td><input type="number" value="${returnN || ''}" placeholder="N" min="1" onchange="updateUAReturnDate(this.closest('tr'))"></td>
-      <td><input type="date" value="${returnDate !== '-' ? returnDate : ''}" min="1900-01-01" max="2100-12-31" style="font-size:11px;"></td>
-      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove();updateUACounts()">×</button></td>
+      <td><input type="number" value="${returnN || ''}" placeholder="N" min="1" onchange="updateUAReturnDate(this.closest('tr'));handleUAFieldChange()"></td>
+      <td><input type="date" value="${returnDate !== '-' ? returnDate : ''}" min="1900-01-01" max="2100-12-31" style="font-size:11px;" onchange="handleUAFieldChange()"></td>
+      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove();updateUACounts();handleUAFieldChange()">×</button></td>
     `;
     tbody.appendChild(tr);
     updateUACounts();
@@ -92,6 +143,7 @@
       sec.style.display = 'block';
       sec.classList.remove('collapsed');
     }
+    handleUAFieldChange(); // 新增记录后自动重算账户价值
   }
 
   function calcReturnDate(date, years) {
@@ -139,12 +191,13 @@
     const tbody = document.getElementById('uaCoefficientBody');
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td><input type="number" value="" placeholder="0" min="0" max="120"></td>
-      <td><input type="number" value="" placeholder="0" min="0" max="120"></td>
-      <td><input type="number" value="" placeholder="100" min="0" max="200" step="0.1"></td>
-      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
+      <td><input type="number" value="" placeholder="0" min="0" max="120" onchange="handleUAFieldChange()"></td>
+      <td><input type="number" value="" placeholder="0" min="0" max="120" onchange="handleUAFieldChange()"></td>
+      <td><input type="number" value="" placeholder="100" min="0" max="200" step="0.1" onchange="handleUAFieldChange()"></td>
+      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove();handleUAFieldChange()">×</button></td>
     `;
     tbody.appendChild(tr);
+    handleUAFieldChange(); // 新增给付系数行后自动重算
   }
 
   function getUACoefficientTable() {
@@ -202,6 +255,7 @@
     const current = new Date(startDate);
     let accountValue = 0;
     let cumTotalIn = 0, cumTotalOut = 0, cumAddFee = 0, cumFeeReturn = 0, cumRiskFee = 0, cumMgmtFee = 0;
+    let cumActiveIn = 0; // 仅主动资金流入（不含年金转入），用于组合"累计保费"
     let cumYearPremium = 0;
     let effectiveSum = sumAssured; // 有效保险金额（默认=基本保额，table模式时动态计算）
 
@@ -224,6 +278,7 @@
           if (f.flowType === 'in') {
             accountValue += (f.amount - fee);
             cumTotalIn += f.amount;
+            if (f.source !== 'annuityTransfer') cumActiveIn += f.amount; // 年金转入不算主动累计保费
             cumAddFee += fee;
             if (f.isAuto) cumYearPremium += f.amount;
           } else { // out
@@ -319,6 +374,7 @@
             effectiveSumAssured: Math.round(effectiveSum),
             accountValue: Math.round(accountValue),
             cumTotalIn: Math.round(cumTotalIn),
+            cumActiveIn: Math.round(cumActiveIn),
             cumTotalOut: Math.round(cumTotalOut),
             cumFee: Math.round(cumAddFee),
             cumFeeReturn: Math.round(cumFeeReturn),
@@ -336,45 +392,22 @@
     console.log('UA Complete. AV:', Math.round(accountValue), 'RiskFeeTotal:', cumRiskFee.toFixed(2));
     return {
       annualRows,
-      summary: { cumTotalIn, cumTotalOut, cumAddFee, cumFeeReturn, cumRiskFee, cumMgmtFee, finalAV: Math.round(accountValue) }
+      summary: { cumTotalIn, cumActiveIn, cumTotalOut, cumAddFee, cumFeeReturn, cumRiskFee, cumMgmtFee, finalAV: Math.round(accountValue) }
     };
   }
   function recalcUAAccount() {
     const policy = getCurrentFormPolicy();
     if (!policy || policy.designType !== '万能型') return;
-    const config = getUAConfig();
-    config.riskFeeTable = getUARiskFeeTable();
-    config.coefficientTable = getUACoefficientTable();
-    const interestRates = getUAInterestRates();
-    let fundFlows = getUAFundFlowData();
-    // 合并年金转入记录作为入账资金
-    const transferRecords = getUATransferData();
-    transferRecords.forEach(t => {
-      if (t.amount > 0) {
-        fundFlows.push({
-          date: t.date,
-          flowType: 'in',
-          amount: t.amount,
-          feeRate: t.feeRate,
-          returnType: t.returnType,
-          returnN: t.returnN,
-          returnDate: t.returnDate,
-          source: 'annuityTransfer'
-        });
-      }
-    });
-    // Re-sort after merging
-    fundFlows.sort((a, b) => a.date.localeCompare(b.date));
-    if (interestRates.length === 0) {
+    if (getUAInterestRates().length === 0) {
       alert('请至少输入一条结算利率数据');
       return;
     }
-    if (fundFlows.length === 0) {
+    if (getUAFundFlowData().length === 0) {
       alert('资金出入流水表为空，请先建立初始资金记录。\n点击「+ 新增资金记录」添加一笔初始资金入账。');
       return;
     }
-    const result = calcUAAccount(interestRates, fundFlows, config, policy);
-    _uaCache[policy.id] = result;
+    const result = recalcUAAccountSilent();
+    if (!result) return;
     renderUAResult(result);
     const div = document.getElementById('uaCalcResult');
     div.style.display = 'block';
@@ -401,12 +434,12 @@
       </tr>
     `).join('');
   }
-  function syncUAToCashValues() {
+  function syncUAToCashValues(silent) {
     const policy = getCurrentFormPolicy();
-    if (!policy) { alert('无法找到该保单数据，刷新页面后重试'); return; }
+    if (!policy) { if (!silent) alert('无法找到该保单数据，刷新页面后重试'); return; }
     const cached = _uaCache[policy.id];
     if (!cached || !cached.annualRows.length) {
-      alert('请先重新计算账户价值');
+      if (!silent) alert('请先重新计算账户价值');
       return;
     }
     policy.cashValues = cached.annualRows.map(r => ({
@@ -429,7 +462,7 @@
     updateCashValueTable();
     renderTable();
     document.getElementById('cashValueImported').checked = true;
-    alert(`已将 ${policy.cashValues.length} 个年度的账户价值（生存总利益）同步到现金价值表。\n现在可以切换到「利益演示」页查看图表和IRR。`);
+    if (!silent) alert(`已将 ${policy.cashValues.length} 个年度的账户价值（生存总利益）同步到现金价值表。\n现在可以切换到「利益演示」页查看图表和IRR。`);
   }
   function addUAAdditionalRow() {
     const tbody = document.getElementById('uaAPBody');
@@ -469,24 +502,26 @@
     const now = new Date();
     const monthStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
     tr.innerHTML = `
-      <td><input type="month" value="${monthStr}"></td>
-      <td><input type="number" value="3.50" placeholder="3.50" min="0" max="20" step="0.01"></td>
-      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove();updateUACounts()">×</button></td>
+      <td><input type="month" value="${monthStr}" onchange="handleUAFieldChange()"></td>
+      <td><input type="number" value="3.50" placeholder="3.50" min="0" max="20" step="0.01" onchange="handleUAFieldChange()"></td>
+      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove();updateUACounts();handleUAFieldChange()">×</button></td>
     `;
     tbody.appendChild(tr);
     updateUACounts();
+    handleUAFieldChange(); // 新增结算利率行后自动重算
   }
 
   function addUARiskFeeRow() {
     const tbody = document.getElementById('uaRiskFeeBody');
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td><input type="number" value="" placeholder="0" min="0" max="120"></td>
-      <td><input type="number" value="" placeholder="0" min="0" max="120"></td>
-      <td><input type="number" value="" placeholder="0.50" min="0" step="0.01"></td>
-      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove()">×</button></td>
+      <td><input type="number" value="" placeholder="0" min="0" max="120" onchange="handleUAFieldChange()"></td>
+      <td><input type="number" value="" placeholder="0" min="0" max="120" onchange="handleUAFieldChange()"></td>
+      <td><input type="number" value="" placeholder="0.50" min="0" step="0.01" onchange="handleUAFieldChange()"></td>
+      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove();handleUAFieldChange()">×</button></td>
     `;
     tbody.appendChild(tr);
+    handleUAFieldChange(); // 新增风险费率行后自动重算
   }
 
   function toggleUAReturnN() {
@@ -521,9 +556,15 @@
       const isUniversal = document.getElementById('designType').value === '万能型';
       document.getElementById('uaNonUniversal').style.display = isUniversal ? 'none' : 'block';
       document.getElementById('uaContent').style.display = isUniversal ? 'block' : 'none';
-      // Load cached result if available
-      if (isUniversal && policy && _uaCache[policy.id]) {
-        renderUAResult(_uaCache[policy.id]);
+      // 打开即算：缓存命中直接渲染，否则用源数据实时重算（万能型不落盘 cashValues，结果纯派生）
+      if (isUniversal && policy) {
+        if (_uaCache[policy.id]) {
+          renderUAResult(_uaCache[policy.id]);
+        } else {
+          const silentResult = recalcUAAccountSilent();
+          if (silentResult) renderUAResult(silentResult);
+        }
+        resetUASectionCollapse(policy); // 每次打开重置折叠（不持久化）
       }
       // Show edit mode prompt if not in edit mode
       if (isUniversal && policy && document.getElementById('company').disabled) {
@@ -890,8 +931,9 @@
         // Reload UA data into form (disableEditMode already ran without UA data, so UI is blank)
         loadUADataToForm(policy);
         disableUAInputs();
-        // Recalculate and show UA result (cache was cleared, so switchTab won't find it)
-        recalcUAAccount();
+        // 保存后重新计算并展示账户价值（不落盘 cashValues；源数据已是唯一真理，结果用时即算）
+        const uaResult = recalcUAAccountSilent();
+        if (uaResult) renderUAResult(uaResult);
       }
     }
     return originalRet;

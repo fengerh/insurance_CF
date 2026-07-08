@@ -159,9 +159,15 @@
     document.querySelector('.table-wrapper').style.display = view === 'list' ? 'block' : 'none';
     document.getElementById('calendarView').style.display = view === 'calendar' ? 'block' : 'none';
     document.getElementById('waterfallView').style.display = view === 'waterfall' ? 'block' : 'none';
-    // 列表视图显示新增按钮，日历/瀑布流视图显示模式切换
-    document.getElementById('listAddBtn').style.display = view === 'list' ? 'inline-flex' : 'none';
+    // 列表视图显示新增按钮，日历/瀑布流视图显示模式切换；组合组仅在列表视图显示
+    const inCombo = (typeof comboMode !== 'undefined') && comboMode;
+    document.getElementById('listAddBtn').style.display = (view === 'list' && !inCombo) ? 'inline-flex' : 'none';
+    const comboToggleGroup = document.getElementById('comboToggleGroup');
+    if (comboToggleGroup) comboToggleGroup.style.display = view === 'list' ? 'inline-flex' : 'none';
     document.getElementById('calendarModeToggle').style.display = (view === 'calendar' || view === 'waterfall') ? 'inline-flex' : 'none';
+    // 非列表视图下隐藏整个 header-ops，避免空容器在 flex 流中产生的两侧 gap
+    const headerOps = document.querySelector('.header-ops');
+    if (headerOps) headerOps.style.display = view === 'list' ? 'inline-flex' : 'none';
     // 从列表视图切换到日历/瀑布流时，默认选择「缴费及领取」；日历⇄瀑布流切换则保持原筛选不变
     if (prevView === 'list' && (view === 'calendar' || view === 'waterfall')) {
       calendarMode = 'all';
@@ -995,10 +1001,28 @@
       if (statuses.includes('年金领取')) annuityCount++;
       if (statuses.includes('满期')) matureCount++;
     });
+    // 万能账户：历年资金出入流水（入-出）累加进"总的累计已交保费"
+    // 投入(入)按扣手续费前金额计；提出(出)按扣手续费后(含手续费)金额计
+    // 仅统计 fundFlows（年金转入明细 transferRecords 不计入）；只统计 日期<=基准日的流水（不限年份）
+    let totalFundFlow = 0;
+    activeData.forEach(p => {
+      if (!p.universalAccount || !p.universalAccount.fundFlows) return;
+      p.universalAccount.fundFlows.forEach(f => {
+        if (!f.date || isNaN(new Date(f.date).getTime())) return;
+        const fDate = new Date(f.date);
+        fDate.setHours(0, 0, 0, 0);                   // 归一到当地零点，按日期精确比较
+        if (fDate > today) return;                    // 只统计 日期<=基准日的流水（不限年份）
+        const amt = parseFloat(f.amount) || 0;
+        const fee = amt * (parseFloat(f.feeRate) || 0) / 100;
+        if (f.flowType === 'out') totalFundFlow -= (amt + fee); // 出：扣手续费后(含费)
+        else totalFundFlow += amt;                              // 入：扣手续费前
+      });
+    });
+
     const totalPaidPremium = activeData.reduce((sum, p) => {
       const paidYears = calcPaidYears(p.startDate, p.paymentTerm, today);
       return sum + (parseFloat(p.annualPremium) || 0) * paidYears;
-    }, 0);
+    }, 0) + totalFundFlow;
 
     const currentYear = today.getFullYear();
     let paidCount = 0, paidAmount = 0;

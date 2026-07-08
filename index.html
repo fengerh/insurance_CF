@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>保单管理工具 v20260707.1600</title>
+<title>保单管理工具 v20260708.1000</title>
 <link rel="stylesheet" href="insurance_CF.css">
 
 </head>
@@ -14,12 +14,18 @@
      <div class="header-left">
        <h1>📋 保单管理工具</h1>
        <div class="view-toggle">
-        <button class="btn" id="listViewBtn" onclick="switchView('list')">📋列表</button>
-        <button class="btn" id="waterfallViewBtn" onclick="switchView('waterfall')">📊瀑布</button>
-        <button class="btn" id="calendarViewBtn" onclick="switchView('calendar')">📅日历</button>
+        <button class="btn" id="listViewBtn" onclick="switchView('list')">保单列表</button>
+        <button class="btn" id="waterfallViewBtn" onclick="switchView('waterfall')">瀑布流</button>
+        <button class="btn" id="calendarViewBtn" onclick="switchView('calendar')">日历视图</button>
        </div>
-       <button class="btn btn-primary" id="listAddBtn" style="margin-left:12px;" onclick="openAddModal()">+新增保单</button>
-       <div class="view-toggle" id="calendarModeToggle" style="display:none; margin-left:12px;">
+      <div class="header-ops">
+        <div class="combo-group" id="comboToggleGroup">
+          <button class="btn btn-primary" id="comboModeBtn" onclick="toggleComboMode()">组合利益演示</button>
+          <button class="btn btn-primary" id="comboStartBtn" onclick="startComboBenefit()" style="display:none;">▶ 开始演示</button>
+        </div>
+        <button class="btn btn-primary" id="listAddBtn" onclick="openAddModal()">+新增保单</button>
+      </div>
+      <div class="view-toggle" id="calendarModeToggle" style="display:none;">
          <button class="btn active" id="modeAllBtn" onclick="setCalendarMode('all')">缴费及领取</button>
          <button class="btn" id="modePaymentBtn" onclick="setCalendarMode('payment')">仅缴费</button>
          <button class="btn" id="modePayoutBtn" onclick="setCalendarMode('payout')">仅领取</button>
@@ -104,7 +110,7 @@
     <table>
       <thead>
         <tr>
-          <th style="text-align:center;width:60px;">序号</th>
+          <th id="seqHeader" style="text-align:center;width:60px;">序号</th>
           <th class="sortable" onclick="toggleSort('company')">保险公司 <span class="sort-indicator"></span></th>
           <th class="sortable" onclick="toggleSort('productName')">产品名称 <span class="sort-indicator"></span></th>
           <th class="sortable" onclick="toggleSort('productCategory')">类别 <span class="sort-indicator"></span></th>
@@ -130,7 +136,7 @@
           </th>
           <th class="sortable" onclick="toggleSort('channel')">渠道 <span class="sort-indicator"></span></th>
           <th style="width:55px;">现价表</th>
-          <th>操作</th>
+          <th id="actionColHeader">操作</th>
         </tr>
       </thead>
       <tbody id="tableBody"></tbody>
@@ -466,7 +472,7 @@
 
           <!-- 区块1: 基本参数 -->
           <div class="ua-section collapsed">
-            <div class="ua-section-title" onclick="toggleUASection(this)">📊 基本参数（年金险关联）</div>
+            <div class="ua-section-title" onclick="toggleUASection(this)">📊 基本参数（年金险关联）<span id="uaLinkedAnnuityPrompt" style="display:none;font-size:12px;color:#059669;margin-left:8px;"></span></div>
             <div class="ua-section-body">
               <div class="ua-row">
                 <div class="form-group">
@@ -494,7 +500,6 @@
                   <input type="checkbox" id="uaCanReceiveTransfer" onchange="onUACanReceiveTransferChange()">
                   接受年金转入（关联年金险可转入本万能账户）
                 </label>
-                <span id="uaLinkedAnnuityPrompt" style="display:none;font-size:12px;color:#059669;"></span>
               </div>
             </div>
           </div>
@@ -578,7 +583,7 @@
               <div class="ua-row">
                 <div class="form-group">
                   <label>收取方式</label>
-                  <select id="uaRiskFeeType" onchange="toggleUARiskFee()">
+                  <select id="uaRiskFeeType" onchange="toggleUARiskFee();handleUAFieldChange()">
                     <option value="none">不收取</option>
                     <option value="sumAssured">每千元保额年费率</option>
                     <option value="table">按年龄查表</option>
@@ -586,11 +591,11 @@
                 </div>
                 <div class="form-group" id="uaRiskFeeRateGroup" style="display:none;">
                   <label>年费率（每千元保额，元）</label>
-                  <input type="number" id="uaRiskFeeRate" placeholder="如 0.5" min="0" step="0.01">
+                  <input type="number" id="uaRiskFeeRate" placeholder="如 0.5" min="0" step="0.01" onchange="handleUAFieldChange()">
                 </div>
                 <div class="form-group" id="uaRiskNetGroup" style="display:none;">
                   <label>风险保额计算</label>
-                  <select id="uaRiskNetCalc">
+                  <select id="uaRiskNetCalc" onchange="handleUAFieldChange()">
                     <option value="basicSum">基本保额</option>
                     <option value="netAtRisk">基本保额 - 账户价值</option>
                   </select>
@@ -603,7 +608,7 @@
                       <th>起始年龄</th>
                       <th>结束年龄</th>
                       <th>每千元保额年费率（元）</th>
-                      <th>操作</th>
+                      <th id="actionColHeader">操作</th>
                     </tr>
                   </thead>
                   <tbody id="uaRiskFeeBody"></tbody>
@@ -746,7 +751,36 @@
   </div>
 </div>
 
-
+<!-- 组合利益演示模态框 -->
+<div class="modal-overlay" id="comboBenefitModal">
+  <div class="modal combo-benefit-modal">
+    <div class="modal-header">
+      <h3 class="modal-title" id="comboBenefitModalTitle">组合利益演示</h3>
+      <button class="modal-close" onclick="closeComboBenefitModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="comboBenefitSubtitle" style="font-size:13px;color:#6b7280;margin-bottom:10px;"></div>
+      <div class="benefit-chart-container" id="comboBenefitChartContainer">
+        <canvas id="comboBenefitCanvas"></canvas>
+        <div class="benefit-tooltip" id="comboBenefitTooltip"></div>
+      </div>
+      <div class="benefit-summary" id="comboBenefitSummary" style="display:none;">
+        <div class="benefit-summary-left">
+          <div class="benefit-summary-title" id="comboBenefitSummaryTitle">第 1 保单年度利益测算</div>
+          <div class="benefit-summary-row">
+            <span class="benefit-summary-item"><span class="bs-label">单利年化：</span><span class="bs-val" id="comboBsSimple">-</span></span>
+            <span class="benefit-summary-item"><span class="bs-label">复利(IRR)：</span><span class="bs-val" id="comboBsIRR">-</span></span>
+          </div>
+        </div>
+        <div class="benefit-summary-right" id="comboBenefitBaseInfo"></div>
+      </div>
+      <div class="benefit-table-wrapper" id="comboBenefitTableWrapper">
+        <table class="benefit-table" id="comboBenefitTable"></table>
+      </div>
+      <div class="benefit-empty" id="comboBenefitEmpty">所选保单缺少利益数据，无法演示</div>
+    </div>
+  </div>
+</div>
 
 <script src="insurance_CF_core.js"></script>
 <script src="insurance_CF_list.js"></script>
