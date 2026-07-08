@@ -125,7 +125,7 @@
     document.getElementById('linkedUAPolicy').style.display = policy.transferToUA ? 'inline-block' : 'none';
     document.getElementById('linkedUAPrompt').style.display = 'none';
     if (policy.transferToUA) {
-      populateLinkedUAPolicies();
+      populateLinkedUAPolicies(policy.linkedUAPolicyId);
       if (policy.linkedUAPolicyId) {
         document.getElementById('linkedUAPrompt').style.display = 'inline';
         document.getElementById('linkedUAPrompt').textContent = '✅ 已关联万能险：' + (policies.find(p => p.id === policy.linkedUAPolicyId)?.productName || '');
@@ -374,9 +374,10 @@
     updateCashValueTable();
   }
 
-  function populateLinkedUAPolicies() {
+  function populateLinkedUAPolicies(linkedId) {
     const sel = document.getElementById('linkedUAPolicy');
-    const currentVal = sel.value;
+    // 优先用保单数据里的"当前已关联 id"，避免依赖易失的 DOM .value（选项未生成时 .value 会返回空）
+    const currentVal = (linkedId != null && linkedId !== '') ? linkedId : sel.value;
     const curId = document.getElementById('policyId').value;
     sel.innerHTML = '<option value="">-- 请选择关联的万能险保单 --</option>';
     // 显示所有已开启"可被转入"的万能险，加上当前已关联的（无论是否开启）
@@ -423,20 +424,20 @@
     const tr = document.createElement('tr');
     const d = data || {};
     tr.innerHTML = `
-      <td><input type="date" value="${d.date || ''}" min="1900-01-01" max="2100-12-31"></td>
+      <td><input type="date" value="${d.date || ''}" min="1900-01-01" max="2100-12-31" onchange="handleUAFieldChange()"></td>
       <td style="font-size:12px;">${d.sourcePolicyName || ''}<input type="hidden" class="uaTransferSourceId" value="${d.sourcePolicyId || ''}"></td>
       <td><input type="number" value="${d.amount || ''}" placeholder="0" min="0" step="0.01" style="background:#f3f4f6;color:#6b7280;" readonly title="转入金额继承自年金险，不可修改"></td>
-      <td><input type="number" value="${d.feeRate !== undefined ? d.feeRate : '0'}" placeholder="0" min="0" max="100" step="0.01"></td>
+      <td><input type="number" value="${d.feeRate !== undefined ? d.feeRate : '0'}" placeholder="0" min="0" max="100" step="0.01" onchange="handleUAFieldChange()"></td>
       <td>
-        <select onchange="updateUAReturnDate(this.closest('tr'))">
+        <select onchange="updateUAReturnDate(this.closest('tr'));handleUAFieldChange()">
           <option value="none"${d.returnType === 'none'?' selected':''}>不返还</option>
           <option value="afterN"${d.returnType === 'afterN'?' selected':''}>满N年后返还</option>
           <option value="immediate"${d.returnType === 'immediate'?' selected':''}>立即返还</option>
         </select>
       </td>
-      <td><input type="number" value="${d.returnN || ''}" placeholder="N" min="1" onchange="updateUAReturnDate(this.closest('tr'))"></td>
-      <td><input type="date" value="${d.returnDate || ''}" min="1900-01-01" max="2100-12-31" style="font-size:11px;"></td>
-      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove();updateUACounts()">×</button></td>
+      <td><input type="number" value="${d.returnN || ''}" placeholder="N" min="1" onchange="updateUAReturnDate(this.closest('tr'));handleUAFieldChange()"></td>
+      <td><input type="date" value="${d.returnDate || ''}" min="1900-01-01" max="2100-12-31" style="font-size:11px;" onchange="handleUAFieldChange()"></td>
+      <td><button type="button" class="del-row-btn" onclick="this.closest('tr').remove();updateUACounts();handleUAFieldChange()">×</button></td>
     `;
     tbody.appendChild(tr);
     updateUACounts();
@@ -444,6 +445,7 @@
     const sec = document.getElementById('uaTransferSection');
     sec.style.display = 'block';
     sec.classList.remove('collapsed');
+    handleUAFieldChange(); // 新增年金转入记录后自动重算
   }
 
   function getUATransferData() {
@@ -489,70 +491,81 @@
     }
   }
   // ===== 利益演示 =====
-  let benefitSelectedYear = null;
+  let benefitSelectedYear = null;       // 单保单选中年度
+  let _comboSelectedYear = null;         // 组合选中年度
+  let _comboRows = null;                 // 组合合并后的利益行
+  let _comboPolicyList = null;           // 组合包含的两张保单
 
   function getBenefitDemoMode() {
     const sel = document.getElementById('benefitDemoMode');
     return sel ? sel.value : 'total';
   }
 
-  function getBenefitValue(r) {
-    const mode = getBenefitDemoMode();
+  function getBenefitValue(r, mode) {
+    if (mode === undefined) mode = getBenefitDemoMode();
     return mode === 'totalWithOther' ? (r.totalBenefitWithOther || r.totalBenefit) : r.totalBenefit;
   }
 
-  function getBenefitLabel() {
-    return getBenefitDemoMode() === 'totalWithOther' ? '总利益（含）' : '保单总利益';
+  function getBenefitLabel(mode) {
+    if (mode === undefined) mode = getBenefitDemoMode();
+    return mode === 'totalWithOther' ? '总利益（含）' : '保单总利益';
   }
 
-  function computeBenefitData() {
-    const policy = getCurrentFormPolicy();
+  // 万能账户计算结果（带缓存），供单保单与组合 IRR 共用
+  function getUAResult(policy) {
+    if (!policy || !policy.universalAccount) return null;
+    let uaResult = _uaCache[policy.id];
+    if (!uaResult || !uaResult.annualRows || uaResult.annualRows.length === 0) {
+      const ua = policy.universalAccount;
+      const config = {
+        minRate: parseFloat(ua.minRate) || 0,
+        entryRate: parseFloat(ua.entryRate) || 100,
+        mgmtFee: parseFloat(ua.mgmtFee) || 0,
+        demoRateMode: ua.demoRateMode || 'settled',
+        riskFeeType: ua.riskFeeType || 'none',
+        riskFeeRate: parseFloat(ua.riskFeeRate) || 0,
+        riskNetCalc: ua.riskNetCalc || 'basicSum',
+        riskFeeTable: ua.riskFeeTable || []
+      };
+      const interestRates = (ua.interestRates || []).map(ir => ({ yearMonth: ir.yearMonth, rate: parseFloat(ir.rate) || 0 }));
+      const fundFlows = (ua.fundFlows || []).map(f => ({
+        date: f.date,
+        flowType: f.flowType,
+        amount: parseFloat(f.amount) || 0,
+        feeRate: parseFloat(f.feeRate) || 0,
+        returnType: f.returnType,
+        returnN: parseInt(f.returnN) || 0,
+        returnDate: f.returnDate || ''
+      }));
+      // 合并年金转入记录
+      const transferRecords = ua.transferRecords || [];
+      transferRecords.forEach(t => {
+        if (parseFloat(t.amount) > 0) {
+          fundFlows.push({
+            date: t.date,
+            flowType: 'in',
+            amount: parseFloat(t.amount) || 0,
+            feeRate: parseFloat(t.feeRate) || 0,
+            returnType: t.returnType || 'none',
+            returnN: parseInt(t.returnN) || 0,
+            returnDate: t.returnDate || '',
+            source: 'annuityTransfer'
+          });
+        }
+      });
+      fundFlows.sort((a, b) => a.date.localeCompare(b.date));
+      uaResult = calcUAAccount(interestRates, fundFlows, config, policy);
+      _uaCache[policy.id] = uaResult;
+    }
+    return uaResult;
+  }
+
+  // 计算单个保单的利益分量行（按持有年度对齐）
+  function computeSinglePolicyRows(policy, opts) {
     if (!policy) return null;
     // 万能型产品：使用万能账户计算引擎结果
     if (policy.designType === '万能型' && policy.universalAccount && policy.universalAccount.fundFlows && policy.universalAccount.fundFlows.length > 0) {
-      let uaResult = _uaCache[policy.id];
-      if (!uaResult || !uaResult.annualRows || uaResult.annualRows.length === 0) {
-        const ua = policy.universalAccount;
-        const config = {
-          minRate: parseFloat(ua.minRate) || 0,
-          entryRate: parseFloat(ua.entryRate) || 100,
-          mgmtFee: parseFloat(ua.mgmtFee) || 0,
-          demoRateMode: ua.demoRateMode || 'settled',
-          riskFeeType: ua.riskFeeType || 'none',
-          riskFeeRate: parseFloat(ua.riskFeeRate) || 0,
-          riskNetCalc: ua.riskNetCalc || 'basicSum',
-          riskFeeTable: ua.riskFeeTable || []
-        };
-        const interestRates = (ua.interestRates || []).map(ir => ({ yearMonth: ir.yearMonth, rate: parseFloat(ir.rate) || 0 }));
-        const fundFlows = (ua.fundFlows || []).map(f => ({
-          date: f.date,
-          flowType: f.flowType,
-          amount: parseFloat(f.amount) || 0,
-          feeRate: parseFloat(f.feeRate) || 0,
-          returnType: f.returnType,
-          returnN: parseInt(f.returnN) || 0,
-          returnDate: f.returnDate || ''
-        }));
-        // 合并年金转入记录
-        const transferRecords = ua.transferRecords || [];
-        transferRecords.forEach(t => {
-          if (parseFloat(t.amount) > 0) {
-            fundFlows.push({
-              date: t.date,
-              flowType: 'in',
-              amount: parseFloat(t.amount) || 0,
-              feeRate: parseFloat(t.feeRate) || 0,
-              returnType: t.returnType || 'none',
-              returnN: parseInt(t.returnN) || 0,
-              returnDate: t.returnDate || '',
-              source: 'annuityTransfer'
-            });
-          }
-        });
-        fundFlows.sort((a, b) => a.date.localeCompare(b.date));
-        uaResult = calcUAAccount(interestRates, fundFlows, config, policy);
-        _uaCache[policy.id] = uaResult;
-      }
+      const uaResult = getUAResult(policy);
       if (uaResult && uaResult.annualRows && uaResult.annualRows.length > 0) {
         const ia = parseInt(policy.insuredAge) || 0;
         return uaResult.annualRows.map(r => ({
@@ -562,7 +575,7 @@
           cumDividend: 0,
           cumAnnuity: 0,
           maturityAmt: 0,
-          cumPremium: r.cumTotalIn,
+          cumPremium: (opts && opts.excludeTransferPremium) ? r.cumActiveIn : r.cumTotalIn,
           totalBenefit: r.netValue,
           cumOtherIncome: 0,
           totalBenefitWithOther: r.netValue
@@ -678,6 +691,58 @@
     return rows;
   }
 
+  // 单保单入口（保持旧调用兼容）
+  function computeBenefitData() {
+    return computeSinglePolicyRows(getCurrentFormPolicy());
+  }
+
+  // 判断是否为"关联年金+万能"组合：
+  // 恰两张保单、一张带 linkedUAPolicyId 的年金 + 一张带 fundFlows 的万能，
+  // 且万能 transferRecords 中存在 sourcePolicyId === 年金.id。
+  function isLinkedAnnuityUACombo(policyList) {
+    if (!policyList || policyList.length !== 2) return null;
+    const annuity = policyList.find(p => (p.productCategory === '年金保险' || p.productCategory === '养老年金保险') && p.linkedUAPolicyId);
+    const ua = policyList.find(p => p.designType === '万能型' && p.universalAccount && p.universalAccount.fundFlows && p.universalAccount.fundFlows.length > 0);
+    if (!annuity || !ua) return null;
+    if (ua.id !== annuity.linkedUAPolicyId) return null;
+    const linked = (ua.universalAccount.transferRecords || []).some(t => t.sourcePolicyId === annuity.id && parseFloat(t.amount) > 0);
+    if (!linked) return null;
+    return { annuity, ua };
+  }
+
+  // 组合（两张保单）合并利益行：按持有年度对齐叠加各分量
+  function computeComboBenefitData(policyList) {
+    if (!policyList || policyList.length === 0) return null;
+    const combo = isLinkedAnnuityUACombo(policyList);
+    const allRows = policyList.map(p => {
+      if (combo && p.designType === '万能型') {
+        // 关联组合：万能累计保费不含年金转入
+        return computeSinglePolicyRows(p, { excludeTransferPremium: true });
+      }
+      return computeSinglePolicyRows(p);
+    });
+    if (allRows.some(r => !r || r.length === 0)) return null;
+    const maxLen = Math.max(...allRows.map(r => r.length));
+    const merged = [];
+    for (let i = 0; i < maxLen; i++) {
+      const parts = allRows.map(r => r[i]).filter(Boolean);
+      if (parts.length === 0) break;
+      const year = parts[0].year;
+      const insuredAgeAtYear = parts[0].insuredAgeAtYear;
+      const sum = (k) => parts.reduce((a, r) => a + (parseFloat(r[k]) || 0), 0);
+      const cashValue = sum('cashValue');
+      const cumDividend = sum('cumDividend');
+      const cumAnnuity = sum('cumAnnuity');
+      const maturityAmt = sum('maturityAmt');
+      const cumPremium = sum('cumPremium');
+      const cumOtherIncome = sum('cumOtherIncome');
+      const totalBenefit = cashValue + cumDividend + cumAnnuity + maturityAmt;
+      const totalBenefitWithOther = totalBenefit + cumOtherIncome;
+      merged.push({ year, insuredAgeAtYear, cashValue, cumDividend, cumAnnuity, maturityAmt, cumPremium, totalBenefit, cumOtherIncome, totalBenefitWithOther });
+    }
+    return merged;
+  }
+
   let _benefitUpdating = false; // guard against recursion
 
   // 基于保单周年日精确计算：投保日期下一年的同一天为第 1 个保单周年日
@@ -704,14 +769,87 @@
     };
   }
 
+  // 单保单利益演示上下文
+  function singleBenefitCtx(policy, rows) {
+    return {
+      canvasId: 'benefitCanvas',
+      tooltipId: 'benefitTooltip',
+      tableId: 'benefitTable',
+      chartContainerId: 'benefitChartContainer',
+      tableWrapperId: 'benefitTableWrapper',
+      summaryId: 'benefitSummary',
+      emptyId: 'benefitEmpty',
+      summaryTitleId: 'benefitSummaryTitle',
+      bsSimpleId: 'bsSimple',
+      bsIRRId: 'bsIRR',
+      mode: getBenefitDemoMode(),
+      sel: { get: () => benefitSelectedYear, set: (v) => { benefitSelectedYear = v; } },
+      annivYear: computeAnnivYear(policy),
+      hideAnnualPremium: false,
+      annualPremium: parseFloat(policy.annualPremium) || 0,
+      paymentTerm: parseInt(policy.paymentTerm) || 0,
+      rowClickName: 'benefitTableRowClick',
+      policyList: undefined,
+      defaultYearFn: (rs) => {
+        const paid = calcPaidYears(policy.startDate, policy.paymentTerm, baseDate);
+        return Math.min(paid, rs[rs.length - 1].year);
+      }
+    };
+  }
+
+  function computeAnnivYear(policy) {
+    if (!policy || !policy.startDate) return -1;
+    const info = calcPolicyAnniversaryInfo(policy.startDate, baseDate);
+    if (info && !info.beforeStart && info.annuityNumber >= 1) return info.annuityNumber;
+    return -1;
+  }
+
+  // 通用渲染入口：单保单与组合共用
+  function renderBenefitView(rows, bctx) {
+    const emptyEl = document.getElementById(bctx.emptyId);
+    const tableWrapper = document.getElementById(bctx.tableWrapperId);
+    const summary = document.getElementById(bctx.summaryId);
+    const chartContainer = document.getElementById(bctx.chartContainerId);
+
+    if (!rows || rows.length === 0) {
+      emptyEl.style.display = 'block';
+      tableWrapper.style.display = 'none';
+      summary.style.display = 'none';
+      chartContainer.style.display = 'none';
+      return;
+    }
+    emptyEl.style.display = 'none';
+    tableWrapper.style.display = 'block';
+    summary.style.display = 'grid';
+    chartContainer.style.display = 'block';
+
+    // 默认选中年度
+    let sy = bctx.sel.get();
+    if (sy === null || sy === undefined || !rows.find(r => r.year === sy)) {
+      sy = bctx.defaultYearFn ? bctx.defaultYearFn(rows) : rows[0].year;
+      bctx.sel.set(sy);
+    }
+
+    drawBenefitChart(rows, bctx);
+    renderBenefitTable(rows, bctx);
+    refreshBenefitSummaryOnly(rows, bctx);
+
+    // 重绘选中竖线
+    const canvas = document.getElementById(bctx.canvasId);
+    if (canvas && canvas._benefitRows && canvas._benefitRedrawWithIndicator) {
+      const idx = canvas._benefitRows.findIndex(r2 => r2.year === bctx.sel.get());
+      if (idx >= 0) canvas._benefitRedrawWithIndicator(idx);
+    }
+  }
+
   function renderBenefitDemo() {
     if (_benefitUpdating) return;
     _benefitUpdating = true;
     try {
       // 右侧提示：基准日期与保单周年日信息
+      const policy = getCurrentFormPolicy();
       const baseInfoEl = document.getElementById('benefitBaseInfo');
       if (baseInfoEl) {
-        const policy = getCurrentFormPolicy();
         const fmt = `${baseDate.getFullYear()}-${String(baseDate.getMonth() + 1).padStart(2, '0')}-${String(baseDate.getDate()).padStart(2, '0')}`;
         if (policy && policy.startDate) {
           const maturityDate = policy.maturityDate ? new Date(policy.maturityDate) : null;
@@ -736,59 +874,17 @@
       }
 
       const rows = computeBenefitData();
-      const emptyEl = document.getElementById('benefitEmpty');
-      const tableWrapper = document.getElementById('benefitTableWrapper');
-      const summary = document.getElementById('benefitSummary');
-      const chartContainer = document.getElementById('benefitChartContainer');
-
-      if (!rows || rows.length === 0) {
-        emptyEl.style.display = 'block';
-        tableWrapper.style.display = 'none';
-        summary.style.display = 'none';
-        chartContainer.style.display = 'none';
-        return;
-      }
-
-      emptyEl.style.display = 'none';
-      tableWrapper.style.display = 'block';
-      summary.style.display = 'grid';
-      chartContainer.style.display = 'block';
-
-      // 默认选中已交费年度或第1年
-      if (benefitSelectedYear === null || !rows.find(r => r.year === benefitSelectedYear)) {
-        const policy = getCurrentFormPolicy();
-        if (policy && policy.startDate) {
-          const paid = calcPaidYears(policy.startDate, policy.paymentTerm, baseDate);
-          benefitSelectedYear = Math.min(paid, rows[rows.length - 1].year);
-        } else {
-          benefitSelectedYear = rows[0].year;
-        }
-      }
-
-      // 绘制图表
-      drawBenefitChart(rows);
-
-      // 渲染汇总表格
-      renderBenefitTable(rows);
-
-      // 更新概要（单利/IRR）
-      refreshBenefitSummaryOnly(rows);
-
-      // 重绘选中竖线
-      const canvas = document.getElementById('benefitCanvas');
-      if (canvas && canvas._benefitRows && canvas._benefitRedrawWithIndicator) {
-        const idx = canvas._benefitRows.findIndex(r2 => r2.year === benefitSelectedYear);
-        if (idx >= 0) canvas._benefitRedrawWithIndicator(idx);
-      }
+      renderBenefitView(rows, singleBenefitCtx(policy, rows));
     } finally {
       _benefitUpdating = false;
     }
   }
 
-  function drawBenefitChart(rows) {
-    const container = document.getElementById('benefitChartContainer');
-    const canvas = document.getElementById('benefitCanvas');
-    const tooltip = document.getElementById('benefitTooltip');
+  function drawBenefitChart(rows, bctx) {
+    const container = document.getElementById(bctx.chartContainerId);
+    const canvas = document.getElementById(bctx.canvasId);
+    const tooltip = document.getElementById(bctx.tooltipId);
+    const mode = bctx.mode;
     const dpr = window.devicePixelRatio || 1;
     const rect = container.getBoundingClientRect();
     const w = rect.width;
@@ -808,7 +904,7 @@
     let maxVal = 0;
     rows.forEach(r => {
       if (r.cumPremium > maxVal) maxVal = r.cumPremium;
-      const bv = getBenefitValue(r);
+      const bv = getBenefitValue(r, mode);
       if (bv > maxVal) maxVal = bv;
     });
     if (maxVal === 0) maxVal = 1;
@@ -862,7 +958,7 @@
     ctx.fillStyle = '#059669';
     ctx.fillRect(pad.left + 120, 8, 12, 3);
     ctx.fillStyle = '#374151';
-    ctx.fillText(getBenefitLabel(), pad.left + 136, 12);
+    ctx.fillText(getBenefitLabel(mode), pad.left + 136, 12);
 
     // 画线 - 累计保费（蓝色）
     ctx.strokeStyle = '#1e40af';
@@ -881,7 +977,7 @@
     ctx.lineWidth = 2.5;
     ctx.beginPath();
     rows.forEach((r, i) => {
-      const xi = x(i), yi = y(getBenefitValue(r));
+      const xi = x(i), yi = y(getBenefitValue(r, mode));
       if (i === 0) ctx.moveTo(xi, yi);
       else ctx.lineTo(xi, yi);
     });
@@ -931,8 +1027,8 @@
       drawVerticalIndicator(idx);
 
       // 鼠标滑动时实时更新下方单利/复利卡片和表格选中行
-      benefitSelectedYear = rr.year;
-      refreshBenefitSummaryOnly(rows2);
+      bctx.sel.set(rr.year);
+      refreshBenefitSummaryOnly(rows2, bctx);
     }
 
     function drawVerticalIndicator(idx) {
@@ -966,7 +1062,7 @@
       ctx.fillStyle = '#1e40af'; ctx.fillRect(params2.pad.left, 8, 12, 3);
       ctx.fillStyle = '#374151'; ctx.font = '11px -apple-system, sans-serif'; ctx.textAlign = 'left'; ctx.fillText('累计已交保费', params2.pad.left + 16, 12);
       ctx.fillStyle = '#059669'; ctx.fillRect(params2.pad.left + 120, 8, 12, 3);
-      ctx.fillText(getBenefitLabel(), params2.pad.left + 136, 12);
+      ctx.fillText(getBenefitLabel(mode), params2.pad.left + 136, 12);
 
       // 保费线
       ctx.strokeStyle = '#1e40af'; ctx.lineWidth = 2; ctx.setLineDash([]);
@@ -976,7 +1072,7 @@
       // 利益线
       ctx.strokeStyle = '#059669'; ctx.lineWidth = 2.5;
       ctx.beginPath();
-      rows.forEach((r, i) => { const xi = params2.x(i), yi = params2.y(getBenefitValue(r)); if (i === 0) ctx.moveTo(xi, yi); else ctx.lineTo(xi, yi); });
+      rows.forEach((r, i) => { const xi = params2.x(i), yi = params2.y(getBenefitValue(r, mode)); if (i === 0) ctx.moveTo(xi, yi); else ctx.lineTo(xi, yi); });
       ctx.stroke();
 
       // 竖线
@@ -998,15 +1094,15 @@
       ctx.fill();
       ctx.fillStyle = '#059669';
       ctx.beginPath();
-      ctx.arc(vx, params2.y(getBenefitValue(r3)), 5, 0, Math.PI * 2);
+      ctx.arc(vx, params2.y(getBenefitValue(r3, mode)), 5, 0, Math.PI * 2);
       ctx.fill();
     }
 
     function handleMouseLeave() {
       tooltip.style.display = 'none';
-      benefitSelectedYear = null;
+      bctx.sel.set(null);
       drawBenefitChartStatic();
-      refreshBenefitSummaryOnly(rows);
+      refreshBenefitSummaryOnly(rows, bctx);
     }
 
     function handleClick(e) {
@@ -1017,8 +1113,8 @@
       if (!rows3) return;
       const idx = Math.round((mx - params3.pad.left) / params3.xScale);
       const ci = Math.max(0, Math.min(rows3.length - 1, idx));
-      benefitSelectedYear = rows3[ci].year;
-      refreshBenefitSummaryOnly(rows3);
+      bctx.sel.set(rows3[ci].year);
+      refreshBenefitSummaryOnly(rows3, bctx);
       drawVerticalIndicator(ci);
       handleMouseMove(e);
     }
@@ -1031,9 +1127,9 @@
       for (let i = 0; i <= 5; i++) { const yy = params4.pad.top + (params4.ph / 5) * i; ctx.beginPath(); ctx.moveTo(params4.pad.left, yy); ctx.lineTo(w - params4.pad.right, yy); ctx.stroke(); const val = maxVal - (maxVal / 5) * i; ctx.fillStyle = '#6b7280'; ctx.font = '11px -apple-system, sans-serif'; ctx.textAlign = 'right'; ctx.fillText(showAmounts ? formatMoney(val) : '***', params4.pad.left - 6, yy + 4); }
       for (let i = 0; i < rows.length; i += 5) { const xx = params4.x(i); ctx.fillStyle = '#6b7280'; ctx.font = '11px -apple-system, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(rows[i].year, xx, h - params4.pad.bottom + 18); }
       ctx.fillStyle = '#1e40af'; ctx.fillRect(params4.pad.left, 8, 12, 3); ctx.fillStyle = '#374151'; ctx.font = '11px -apple-system, sans-serif'; ctx.textAlign = 'left'; ctx.fillText('累计已交保费', params4.pad.left + 16, 12);
-      ctx.fillStyle = '#059669'; ctx.fillRect(params4.pad.left + 120, 8, 12, 3); ctx.fillText(getBenefitLabel(), params4.pad.left + 136, 12);
+      ctx.fillStyle = '#059669'; ctx.fillRect(params4.pad.left + 120, 8, 12, 3); ctx.fillText(getBenefitLabel(mode), params4.pad.left + 136, 12);
       ctx.strokeStyle = '#1e40af'; ctx.lineWidth = 2; ctx.setLineDash([]); ctx.beginPath(); rows.forEach((r, i) => { const xi = params4.x(i), yi = params4.y(r.cumPremium); if (i === 0) ctx.moveTo(xi, yi); else ctx.lineTo(xi, yi); }); ctx.stroke();
-      ctx.strokeStyle = '#059669'; ctx.lineWidth = 2.5; ctx.beginPath(); rows.forEach((r, i) => { const xi = params4.x(i), yi = params4.y(getBenefitValue(r)); if (i === 0) ctx.moveTo(xi, yi); else ctx.lineTo(xi, yi); }); ctx.stroke();
+      ctx.strokeStyle = '#059669'; ctx.lineWidth = 2.5; ctx.beginPath(); rows.forEach((r, i) => { const xi = params4.x(i), yi = params4.y(getBenefitValue(r, mode)); if (i === 0) ctx.moveTo(xi, yi); else ctx.lineTo(xi, yi); }); ctx.stroke();
     }
 
     canvas.onmousemove = handleMouseMove;
@@ -1046,48 +1142,45 @@
 
     drawBenefitChartStatic();
     // 重绘选中状态
-    if (benefitSelectedYear) {
-      const idx = rows.findIndex(r => r.year === benefitSelectedYear);
+    if (bctx.sel.get()) {
+      const idx = rows.findIndex(r => r.year === bctx.sel.get());
       if (idx >= 0) drawVerticalIndicator(idx);
     }
   }
 
-  function renderBenefitTable(rows) {
-    const tbl = document.getElementById('benefitTable');
-    const hasDividend = (parseFloat(rows[rows.length - 1].cumDividend) || 0) > 0 || rows.some(r => r.cumDividend > 0);
+  function renderBenefitTable(rows, bctx) {
+    const tbl = document.getElementById(bctx.tableId);
+    const hasDividend = rows.some(r => r.cumDividend > 0);
     const hasAnnuity = rows.some(r => r.cumAnnuity > 0);
     const hasMaturity = rows.some(r => r.maturityAmt > 0);
+    const annivYear = (bctx.annivYear !== undefined && bctx.annivYear !== null) ? bctx.annivYear : -1;
 
-    // 最近一个已经过保单周年日对应的年度（首年 annuityNumber===0 不加粗）
-    const policy = getCurrentFormPolicy();
-    let annivYear = -1;
-    if (policy && policy.startDate) {
-      const info = calcPolicyAnniversaryInfo(policy.startDate, baseDate);
-      if (info && !info.beforeStart && info.annuityNumber >= 1) annivYear = info.annuityNumber;
-    }
-
-    let cols = ['保单年度', '被保人年龄', '年交保费', '累计保费', '现金价值'];
+    let cols = ['保单年度', '被保人年龄'];
+    if (!bctx.hideAnnualPremium) cols.push('年交保费');
+    cols.push('累计保费', '现金价值');
     if (hasDividend) cols.push('累计红利');
     if (hasAnnuity) cols.push('累计年金');
     if (hasMaturity) cols.push('满期金');
-    cols.push(getBenefitLabel());
+    cols.push(getBenefitLabel(bctx.mode));
 
     tbl.innerHTML = `
       <thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>
       <tbody>
         ${rows.map(r => {
-          const selClass = (benefitSelectedYear === r.year) ? ' selected' : '';
+          const selClass = (bctx.sel.get() === r.year) ? ' selected' : '';
           const isAnniv = (annivYear === r.year);
-          let row = `<tr class="${selClass}${isAnniv ? ' benefit-row-anniv' : ''}" onclick="benefitTableRowClick(${r.year})">`;
+          let row = `<tr class="${selClass}${isAnniv ? ' benefit-row-anniv' : ''}" onclick="${bctx.rowClickName}(${r.year})">`;
           row += `<td>${r.year}</td>`;
           row += `<td>${r.insuredAgeAtYear > 0 ? r.insuredAgeAtYear : '-'}</td>`;
-          row += `<td>${showAmounts ? formatMoney(Math.min(r.year, parseInt(document.getElementById('paymentTerm').value)||0) * (parseFloat(document.getElementById('annualPremium').value)||0)) : '***'}</td>`;
+          if (!bctx.hideAnnualPremium) {
+            row += `<td>${showAmounts ? formatMoney(Math.min(r.year, bctx.paymentTerm || 0) * (bctx.annualPremium || 0)) : '***'}</td>`;
+          }
           row += `<td>${showAmounts ? formatMoney(r.cumPremium) : '***'}</td>`;
           row += `<td>${showAmounts ? formatMoney(r.cashValue) : '***'}</td>`;
           if (hasDividend) row += `<td>${showAmounts ? formatMoney(r.cumDividend) : '***'}</td>`;
           if (hasAnnuity) row += `<td>${showAmounts ? formatMoney(r.cumAnnuity) : '***'}</td>`;
           if (hasMaturity) row += `<td>${showAmounts ? formatMoney(r.maturityAmt) : '***'}</td>`;
-          row += `<td style="font-weight:${isAnniv ? 700 : 600};color:#059669;">${showAmounts ? formatMoney(getBenefitValue(r)) : '***'}</td>`;
+          row += `<td style="font-weight:${isAnniv ? 700 : 600};color:#059669;">${showAmounts ? formatMoney(getBenefitValue(r, bctx.mode)) : '***'}</td>`;
           row += '</tr>';
           return row;
         }).join('')}
@@ -1100,8 +1193,10 @@
     benefitSelectedYear = year;
     const rows = computeBenefitData();
     if (!rows) return;
-    refreshBenefitSummaryOnly(rows);
-    updateBenefitTableSelection();
+    const policy = getCurrentFormPolicy();
+    const bctx = singleBenefitCtx(policy, rows);
+    refreshBenefitSummaryOnly(rows, bctx);
+    updateBenefitTableSelection(bctx);
     const canvas = document.getElementById('benefitCanvas');
     if (canvas && canvas._benefitRedrawWithIndicator && canvas._benefitRows) {
       const idx = canvas._benefitRows.findIndex(r2 => r2.year === year);
@@ -1109,10 +1204,10 @@
     }
   }
 
-  function updateBenefitTableSelection() {
-    document.querySelectorAll('#benefitTable tbody tr').forEach(tr => {
+  function updateBenefitTableSelection(bctx) {
+    document.querySelectorAll('#' + bctx.tableId + ' tbody tr').forEach(tr => {
       const td = tr.querySelector('td');
-      if (td && parseInt(td.textContent) === benefitSelectedYear) {
+      if (td && parseInt(td.textContent) === bctx.sel.get()) {
         tr.classList.add('selected');
       } else {
         tr.classList.remove('selected');
@@ -1121,39 +1216,46 @@
   }
 
   // 仅更新概要卡片，不做任何图表重绘（避免递归）
-  function refreshBenefitSummaryOnly(rows) {
+  function refreshBenefitSummaryOnly(rows, bctx) {
     if (!rows || rows.length === 0) return;
-    const r = rows.find(r2 => r2.year === benefitSelectedYear) || rows[0];
+    let r = rows.find(r2 => r2.year === bctx.sel.get()) || rows[0];
     if (!r) return;
-    benefitSelectedYear = r.year;
+    bctx.sel.set(r.year);
 
-    document.getElementById('benefitSummaryTitle').textContent = `第 ${r.year} 保单年度利益测算`;
-    document.getElementById('bsSimple').textContent = calcSimpleReturn(r).toFixed(2) + '%';
-    document.getElementById('bsSimple').className = 'bs-val ' + (calcSimpleReturn(r) >= 0 ? 'positive' : 'negative');
+    document.getElementById(bctx.summaryTitleId).textContent = `第 ${r.year} 保单年度利益测算`;
+    const sr = calcSimpleReturn(r, bctx.mode);
+    const sEl = document.getElementById(bctx.bsSimpleId);
+    sEl.textContent = sr.toFixed(2) + '%';
+    sEl.className = 'bs-val ' + (sr >= 0 ? 'positive' : 'negative');
 
-    const irrVal = calcIRR(r, rows);
-    document.getElementById('bsIRR').textContent = irrVal.toFixed(2) + '%';
-    document.getElementById('bsIRR').className = 'bs-val ' + (irrVal >= 0 ? 'positive' : 'negative');
+    const irrVal = calcIRR(r, rows, bctx.policyList);
+    const iEl = document.getElementById(bctx.bsIRRId);
+    iEl.textContent = irrVal.toFixed(2) + '%';
+    iEl.className = 'bs-val ' + (irrVal >= 0 ? 'positive' : 'negative');
 
-    updateBenefitTableSelection();
+    updateBenefitTableSelection(bctx);
   }
 
-  // 兼容旧调用：直接等同于 refreshBenefitSummaryOnly
+  // 兼容旧调用
   function updateBenefitSummary(rows) {
-    refreshBenefitSummaryOnly(rows);
+    const policy = getCurrentFormPolicy();
+    refreshBenefitSummaryOnly(rows, singleBenefitCtx(policy, rows));
   }
 
   function drawBenefitChartStatic() {
     // no-op: chart redraw handled by canvas event handlers
   }
 
-  function calcSimpleReturn(r) {
+  function calcSimpleReturn(r, mode) {
     if (r.cumPremium === 0) return 0;
-    const bv = getBenefitValue(r);
+    const bv = getBenefitValue(r, mode);
     return (bv - r.cumPremium) / r.cumPremium / r.year * 100;
   }
 
-  function calcIRR(selectedRow, allRows) {
+  function calcIRR(selectedRow, allRows, policyList) {
+    if (policyList && policyList.length === 2) {
+      return calcComboIRR(selectedRow, allRows, policyList);
+    }
     const policy = getCurrentFormPolicy();
     if (!policy) return 0;
     const year = selectedRow.year;
@@ -1201,9 +1303,14 @@
 
       // 3) 手续费返还：计入现金流（按年归集，避免与终端账户价值重复）
       //    终端值改用账户价值(=现金价值-累计返还)，返还作为独立正现金流，二者不重复
-      const cashValues = getFormCashValues() || [];
+      //    直接从实时计算的 _uaCache 读取，不再依赖落盘的 cashValues
+      let uaCached = (typeof _uaCache !== 'undefined' && _uaCache[policy.id]) || null;
+      if (!uaCached && typeof recalcUAAccountSilent === 'function') {
+        uaCached = recalcUAAccountSilent(); // 兜底：缓存缺失时按源数据重算
+      }
+      const uaAnnualRows = uaCached && uaCached.annualRows ? uaCached.annualRows : [];
       const cumFeeReturnByYear = {};
-      cashValues.forEach(cv => { cumFeeReturnByYear[cv.year] = parseFloat(cv._uaCumFeeReturn) || 0; });
+      uaAnnualRows.forEach(r => { cumFeeReturnByYear[r.year] = parseFloat(r.cumFeeReturn) || 0; });
       let prevCum = 0;
       for (let y = 0; y <= maxY; y++) {
         const cum = cumFeeReturnByYear[y] || 0;
@@ -1274,6 +1381,235 @@
 
     return guess * 100;
   }
+
+  // 关联年金+万能组合 IRR（新公式）：
+  //  成本 = 年金缴费 + 万能主动资金流入/流出(净手续费)
+  //  年金转入万能 = 完全不计（内部搬运）
+  //  末年收益 = 万能账户价值 + 年金现金价值 + 未转入累计年金
+  function calcLinkedComboIRR(selectedRow, policyList, combo, YEAR_MS) {
+    const { annuity, ua } = combo;
+    const starts = policyList.map(p => new Date(p.startDate));
+    const base0 = new Date(Math.min(starts[0].getTime(), starts[1].getTime()));
+    const cashflows = [];
+    const pushCF = (g, amt) => { cashflows[g] = (cashflows[g] || 0) + amt; };
+
+    // 1. 年金缴费（成本），按缴费期对齐到最早投保日
+    const aS = new Date(annuity.startDate);
+    const aDiff = Math.round((aS - base0) / YEAR_MS);
+    const ap = parseFloat(annuity.annualPremium) || 0;
+    const apt = parseInt(annuity.paymentTerm) || 0;
+    for (let t = 1; t <= apt; t++) pushCF((t - 1) + aDiff, -ap);
+
+    // 2. 万能主动资金流入/流出（净手续费），年金转入完全忽略
+    const uaResult = getUAResult(ua);
+    const uaS = new Date(ua.startDate);
+    const uaDiff = Math.round((uaS - base0) / YEAR_MS);
+    function bucket(dateStr) {
+      const fd = new Date(dateStr);
+      if (isNaN(fd.getTime())) return null;
+      return Math.ceil((fd - base0) / YEAR_MS);
+    }
+    function addFlow(dateStr, flowType, amount, feeRate) {
+      const y = bucket(dateStr);
+      if (y === null || y < 0) return;
+      if (!cashflows[y]) cashflows[y] = 0;
+      const amt = parseFloat(amount) || 0;
+      const fee = amt * (parseFloat(feeRate || 0) / 100);
+      if (flowType === 'in') cashflows[y] -= (amt - fee);
+      else cashflows[y] += (amt - fee);
+    }
+    (ua.universalAccount.fundFlows || []).forEach(f => addFlow(f.date, f.flowType, f.amount, f.feeRate));
+    // transferRecords 完全忽略：年金转入万能为内部搬运，不计入现金流
+
+    // 3. 末年收益 = 万能账户价值 + 年金现金价值 + 未转入累计年金（全局年度对齐取值）
+    const selectedGlobalYear = Math.max(0, (selectedRow.year - 1));
+    const aRows = computeSinglePolicyRows(annuity);
+    const uRows = uaResult && uaResult.annualRows;
+    const pick = (rows, diff) => {
+      let b = null;
+      (rows || []).forEach(r => { if ((r.year || 0) + diff <= selectedGlobalYear) b = r; });
+      return b;
+    };
+    const aRow = pick(aRows, aDiff);
+    const uRow = pick(uRows, uaDiff);
+    const transferred = (ua.universalAccount.transferRecords || [])
+      .filter(t => t.sourcePolicyId === annuity.id)
+      .reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+    // 手动模式 cumAnnuity 已不含转入；非手动则扣掉年金转入部分
+    const nonXferAnnuity = annuity.manualAnnuity
+      ? (aRow ? aRow.cumAnnuity : 0)
+      : Math.max(0, (aRow ? aRow.cumAnnuity : 0) - transferred);
+    const benefit = (uRow ? uRow.accountValue : 0) + (aRow ? aRow.cashValue : 0) + nonXferAnnuity;
+    pushCF(selectedGlobalYear, benefit);
+
+    const maxY = selectedGlobalYear;
+    for (let y = 0; y <= maxY; y++) if (cashflows[y] === undefined) cashflows[y] = 0;
+
+    function npv(rate) {
+      let total = 0;
+      for (let t = 0; t <= maxY; t++) total += cashflows[t] / Math.pow(1 + rate, t);
+      return total;
+    }
+    let guess = 0.03;
+    for (let iter = 0; iter < 100; iter++) {
+      const f = npv(guess);
+      if (Math.abs(f) < 0.1) break;
+      const h = 0.0001;
+      const df = (npv(guess + h) - npv(guess - h)) / (2 * h);
+      if (Math.abs(df) < 1e-12) break;
+      guess = guess - f / df;
+      if (guess < -0.99) guess = -0.5;
+      if (guess > 10) guess = 3;
+    }
+    return guess * 100;
+  }
+
+  // 组合（两张保单）IRR：按"投资者净现金流"合并，各保单现金流对齐到最早投保日
+  function calcComboIRR(selectedRow, allRows, policyList) {
+    const YEAR_MS = 365.25 * 24 * 3600 * 1000;
+    const combo = isLinkedAnnuityUACombo(policyList);
+    if (combo) return calcLinkedComboIRR(selectedRow, policyList, combo, YEAR_MS);
+    const starts = policyList.map(p => new Date(p.startDate));
+    const base0 = new Date(Math.min(starts[0].getTime(), starts[1].getTime()));
+    const selectedGlobalYear = Math.max(0, (selectedRow.year - 1));
+    const cashflows = [];
+    const pushCF = (g, amt) => { cashflows[g] = (cashflows[g] || 0) + amt; };
+
+    policyList.forEach(p => {
+      const S = new Date(p.startDate);
+      const yearDiff = Math.round((S - base0) / YEAR_MS); // 0 或 1
+      if (p.designType === '万能型' && p.universalAccount && p.universalAccount.fundFlows && p.universalAccount.fundFlows.length > 0) {
+        const uaResult = getUAResult(p);
+        function bucket(dateStr) {
+          const fd = new Date(dateStr);
+          if (isNaN(fd.getTime())) return null;
+          return Math.ceil((fd - base0) / YEAR_MS);
+        }
+        function addFlow(dateStr, flowType, amount, feeRate) {
+          const y = bucket(dateStr);
+          if (y === null || y < 0) return;
+          if (!cashflows[y]) cashflows[y] = 0;
+          const amt = parseFloat(amount) || 0;
+          const fee = amt * (parseFloat(feeRate || 0) / 100);
+          if (flowType === 'in') cashflows[y] -= (amt - fee);
+          else cashflows[y] += (amt - fee);
+        }
+        (p.universalAccount.fundFlows || []).forEach(f => addFlow(f.date, f.flowType, f.amount, f.feeRate));
+        const otherPolicyIds = policyList.map(q => q.id);
+        (p.universalAccount.transferRecords || []).forEach(t => {
+          // 来自组合内另一张保单的内部年金转入：成本已在年金侧计入，组合 IRR 不再重复计入
+          if (parseFloat(t.amount) > 0 && otherPolicyIds.includes(t.sourcePolicyId)) return;
+          if (parseFloat(t.amount) > 0) addFlow(t.date, 'in', t.amount, t.feeRate || 0);
+        });
+        if (uaResult && uaResult.annualRows) {
+          const cumFee = {};
+          uaResult.annualRows.forEach(r => { cumFee[r.year] = parseFloat(r.cumFeeReturn) || 0; });
+          let prev = 0;
+          for (let y = 0; y <= 100; y++) {
+            const cum = cumFee[y] || 0;
+            const ret = cum - prev;
+            if (ret > 0) pushCF(y, ret);
+            prev = cum;
+          }
+        }
+      } else {
+        const ap = parseFloat(p.annualPremium) || 0;
+        const pt = parseInt(p.paymentTerm) || 0;
+        for (let t = 1; t <= pt; t++) pushCF((t - 1) + yearDiff, -ap);
+      }
+    });
+
+    // 末年：组合总利益（年金转万能已在各自计算中排除/计入，无重复）
+    pushCF(selectedGlobalYear, getBenefitValue(selectedRow, 'total'));
+
+    const maxY = selectedGlobalYear;
+    for (let y = 0; y <= maxY; y++) if (cashflows[y] === undefined) cashflows[y] = 0;
+
+    function npv(rate) {
+      let total = 0;
+      for (let t = 0; t <= maxY; t++) total += cashflows[t] / Math.pow(1 + rate, t);
+      return total;
+    }
+    let guess = 0.03;
+    for (let iter = 0; iter < 100; iter++) {
+      const f = npv(guess);
+      if (Math.abs(f) < 0.1) break;
+      const h = 0.0001;
+      const df = (npv(guess + h) - npv(guess - h)) / (2 * h);
+      if (Math.abs(df) < 1e-12) break;
+      guess = guess - f / df;
+      if (guess < -0.99) guess = -0.5;
+      if (guess > 10) guess = 3;
+    }
+    return guess * 100;
+  }
+
+  // 组合利益演示：两张保单合并渲染到独立模态
+  function renderComboBenefit(policyList) {
+    const rows = computeComboBenefitData(policyList);
+    if (!rows || rows.length === 0) {
+      alert('所选保单缺少现金价值/利益数据，无法组合演示');
+      return;
+    }
+    _comboRows = rows;
+    _comboPolicyList = policyList;
+
+    const bctx = {
+      canvasId: 'comboBenefitCanvas',
+      tooltipId: 'comboBenefitTooltip',
+      tableId: 'comboBenefitTable',
+      chartContainerId: 'comboBenefitChartContainer',
+      tableWrapperId: 'comboBenefitTableWrapper',
+      summaryId: 'comboBenefitSummary',
+      emptyId: 'comboBenefitEmpty',
+      summaryTitleId: 'comboBenefitSummaryTitle',
+      bsSimpleId: 'comboBsSimple',
+      bsIRRId: 'comboBsIRR',
+      mode: 'total',
+      sel: { get: () => _comboSelectedYear, set: (v) => { _comboSelectedYear = v; } },
+      annivYear: -1,
+      hideAnnualPremium: true,
+      rowClickName: 'comboBenefitTableRowClick',
+      policyList: policyList,
+      defaultYearFn: (rs) => rs[0].year
+    };
+    renderBenefitView(rows, bctx);
+  }
+
+  function comboBenefitTableRowClick(year) {
+    if (_benefitUpdating) return;
+    _comboSelectedYear = year;
+    const rows = _comboRows;
+    if (!rows) return;
+    // 组合上下文
+    const bctx = {
+      canvasId: 'comboBenefitCanvas',
+      tooltipId: 'comboBenefitTooltip',
+      tableId: 'comboBenefitTable',
+      chartContainerId: 'comboBenefitChartContainer',
+      tableWrapperId: 'comboBenefitTableWrapper',
+      summaryId: 'comboBenefitSummary',
+      emptyId: 'comboBenefitEmpty',
+      summaryTitleId: 'comboBenefitSummaryTitle',
+      bsSimpleId: 'comboBsSimple',
+      bsIRRId: 'comboBsIRR',
+      mode: 'total',
+      sel: { get: () => _comboSelectedYear, set: (v) => { _comboSelectedYear = v; } },
+      annivYear: -1,
+      hideAnnualPremium: true,
+      rowClickName: 'comboBenefitTableRowClick',
+      policyList: _comboPolicyList,
+      defaultYearFn: (rs) => rs[0].year
+    };
+    refreshBenefitSummaryOnly(rows, bctx);
+    updateBenefitTableSelection(bctx);
+    const canvas = document.getElementById('comboBenefitCanvas');
+    if (canvas && canvas._benefitRedrawWithIndicator && canvas._benefitRows) {
+      const idx = canvas._benefitRows.findIndex(r2 => r2.year === year);
+      if (idx >= 0) canvas._benefitRedrawWithIndicator(idx);
+    }
+  }
+
   // ===== 现金价值表格 =====
   function updateCashValueTable() {
     const body = document.getElementById('cashValueBody');
@@ -1499,7 +1835,7 @@
     document.getElementById('linkedUAPolicy').style.display = policy.transferToUA ? 'inline-block' : 'none';
     document.getElementById('linkedUAPrompt').style.display = 'none';
     if (policy.transferToUA) {
-      populateLinkedUAPolicies();
+      populateLinkedUAPolicies(policy.linkedUAPolicyId);
       if (policy.linkedUAPolicyId) {
         document.getElementById('linkedUAPrompt').style.display = 'inline';
         document.getElementById('linkedUAPrompt').textContent = '✅ 已关联万能险：' + (policies.find(p => p.id === policy.linkedUAPolicyId)?.productName || '');

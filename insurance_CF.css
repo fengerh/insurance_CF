@@ -24,6 +24,18 @@
     
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .header-ops {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .combo-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
   }
   .header-wrapper h1 {
     font-size: 24px;
@@ -267,6 +279,15 @@
     cursor: pointer;
     font-size: 12px;
     transition: all 0.15s;
+  }
+  .action-btn:disabled {
+    background: #f3f4f6;
+    color: #9ca3af;
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+  .action-btn:disabled:hover {
+    background: #f3f4f6;
   }
   .action-edit {
     background: #eff6ff;
@@ -658,6 +679,38 @@
     font-size: 14px;
   }
 
+  /* 组合利益演示 */
+  .combo-chk {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #4f46e5;
+    vertical-align: middle;
+  }
+  .combo-chk:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+    accent-color: #9ca3af;
+  }
+  #comboModeBtn.active {
+    background: #4f46e5;
+    color: #fff;
+    border-color: #4f46e5;
+  }
+  #comboStartBtn.active {
+    opacity: 1;
+  }
+  #comboStartBtn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .combo-benefit-modal {
+    max-width: 1000px;
+  }
+  .combo-benefit-modal .benefit-chart-container {
+    height: 350px;
+  }
+
   @media (max-width: 768px) {
     .form-row { grid-template-columns: 1fr; }
     .toolbar { flex-direction: column; align-items: stretch; }
@@ -820,11 +873,15 @@
     cursor: default;
   }
 
-  .view-toggle {
-    display: inline-flex;
-    align-items: center;
-    margin-left: 16px;
-  }
+.view-toggle {
+  display: inline-flex;
+  align-items: center;
+}
+/* 仅“整体按钮”组在标题后保留 16px 间距；缴费领取切换组不再额外加 margin，
+   由 .header-left 的 gap 统一控制，与列表视图下“组合利益演示↔整体按钮”间距一致 */
+.header-left > .view-toggle:not(#calendarModeToggle) {
+  margin-left: 16px;
+}
   .view-toggle .btn {
     height: 30px;
     padding: 0 14px;
@@ -856,6 +913,16 @@
 
   /* 新增保单按钮与切换按钮统一尺寸 */
   #listAddBtn {
+    height: 30px;
+    padding: 0 14px;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* 组合按钮与新增保单按钮统一尺寸 */
+  .combo-group .btn {
     height: 30px;
     padding: 0 14px;
     font-size: 13px;
@@ -939,7 +1006,7 @@
   .ua-count {
     font-size: 12px;
     font-weight: 600;
-    color: #4f46e5;
+    color: #059669;
     margin-left: 8px;
   }
   .ua-section.collapsed .ua-section-body {
