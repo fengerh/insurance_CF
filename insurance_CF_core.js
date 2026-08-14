@@ -227,9 +227,9 @@
       const isNext = (mo.year === next.getFullYear() && mo.month === next.getMonth());
       const expanded = isCurrent;
 
-      // 月底生存总利益
+      // 月底生存总利益（满期保单不计入，仅统计在 monthEnd 时点仍有效的保单）
       let benefitTotal = 0;
-      filteredForBenefit.forEach(p => {
+      filteredForBenefit.filter(p => isPolicyActive(p, monthEnd)).forEach(p => {
         const comp = calcBenefitComponentsAtDate(p, monthEnd);
         if (!comp) return;
         switch (benefitMode) {
@@ -242,6 +242,40 @@
           default: benefitTotal += Math.round((comp.isMatured ? comp.maturityAmt : comp.cashValue) + comp.dividend + comp.cumAnnuity);
         }
       });
+
+      // 当月追加环比参数：现金价值比上月（跟随当前模式）、增长率含/不含年金（现金价值口径）
+      let deltaMode = null, growNoAnnuity = null, growWithAnnuity = null;
+      if (isCurrent) {
+        const prevMonthEnd = new Date(mo.year, mo.month, 0, 23, 59, 59);
+        // 上月按当前模式的值
+        let prevBenefitTotal = 0;
+        let cashCurr = 0, cashPrev = 0;
+        filteredForBenefit.filter(p => isPolicyActive(p, monthEnd)).forEach(p => {
+          const comp = calcBenefitComponentsAtDate(p, monthEnd);
+          if (!comp) return;
+          cashCurr += comp.cashValue;
+        });
+        filteredForBenefit.filter(p => isPolicyActive(p, prevMonthEnd)).forEach(p => {
+          const comp = calcBenefitComponentsAtDate(p, prevMonthEnd);
+          if (!comp) return;
+          cashPrev += comp.cashValue;
+          switch (benefitMode) {
+            case 'cashValue': prevBenefitTotal += comp.cashValue; break;
+            case 'dividend': prevBenefitTotal += comp.dividend; break;
+            case 'annuity': prevBenefitTotal += comp.cumAnnuity; break;
+            case 'maturity': prevBenefitTotal += comp.maturityAmt; break;
+            case 'otherIncome': prevBenefitTotal += comp.cumOtherIncome; break;
+            case 'totalWithOther': prevBenefitTotal += Math.round((comp.isMatured ? comp.maturityAmt : comp.cashValue) + comp.dividend + comp.cumAnnuity + comp.cumOtherIncome); break;
+            default: prevBenefitTotal += Math.round((comp.isMatured ? comp.maturityAmt : comp.cashValue) + comp.dividend + comp.cumAnnuity);
+          }
+        });
+        deltaMode = benefitTotal - prevBenefitTotal;
+        const monthAnnuity = (summary['年金领取'] && summary['年金领取'].total) || 0;
+        if (cashPrev > 0) {
+          growNoAnnuity = (cashCurr - cashPrev) / cashPrev * 100;
+          growWithAnnuity = (cashCurr + monthAnnuity - cashPrev) / cashPrev * 100;
+        }
+      }
 
       const card = document.createElement('div');
       card.className = 'wf-month-card' + (isCurrent ? ' current' : '');
@@ -270,6 +304,15 @@
         }
       }
       summaryParts.push(`<span style="color:#111827;font-size:13px;margin-right:10px;">${bullet}月底 ${benefitLabel} ¥${amtStr(benefitTotal)}</span>`);
+      // 当月追加环比参数
+      if (isCurrent && deltaMode !== null) {
+        const fmtDelta = (v) => (v >= 0 ? '+' : '-') + '¥' + amtStr(Math.abs(v));
+        const fmtPct = (v) => v === null || !isFinite(v) ? '-' : (v >= 0 ? '+' : '-') + Math.abs(v).toFixed(2) + '%';
+        const fmtAnnual = (v) => v === null || !isFinite(v) ? '-' : (v >= 0 ? '+' : '-') + Math.abs(v * 12).toFixed(2) + '%';
+        summaryParts.push(`<span style="color:#059669;font-size:13px;margin-right:10px;">${bullet}${benefitLabel}比上月 ${fmtDelta(deltaMode)}</span>`);
+        summaryParts.push(`<span style="color:#059669;font-size:13px;margin-right:10px;">${bullet}增长率不含年金 ${fmtPct(growNoAnnuity)}（年化 ${fmtAnnual(growNoAnnuity)}）</span>`);
+        summaryParts.push(`<span style="color:#059669;font-size:13px;margin-right:10px;">${bullet}增长率含当月年金 ${fmtPct(growWithAnnuity)}（年化 ${fmtAnnual(growWithAnnuity)}）</span>`);
+      }
       const summaryDiv = document.createElement('div');
       summaryDiv.className = 'wf-summary';
       summaryDiv.innerHTML = summaryParts.join('');
@@ -577,7 +620,7 @@
       const modeLabels = { total:'保单总利益', cashValue:'现金价值', annuity:'累计年金', dividend:'累计红利', maturity:'满期金', otherIncome:'保单其他收入', totalWithOther:'总利益（含）' };
       const filteredPolicies = getFilteredPolicies().filter(p => !p.excludedFromSummary);
       let benefitTotal = 0;
-      filteredPolicies.forEach(p => {
+      filteredPolicies.filter(p => isPolicyActive(p, monthEnd)).forEach(p => {
         const comp = calcBenefitComponentsAtDate(p, monthEnd);
         if (!comp) return;
         switch (benefitMode) {
@@ -1117,7 +1160,8 @@
           })()} 汇总</div>
           <div class="stat-value">${(() => {
             const benefitMode = document.getElementById('colBenefitMode').value;
-            const benefitData = data;
+            // 满期保单不计入总利益汇总，仅统计在 today 时点仍有效的保单
+            const benefitData = data.filter(p => isPolicyActive(p, today));
             let benefitTotal = 0;
             benefitData.forEach(p => {
               const comp = calcBenefitComponentsAtDate(p, today);
