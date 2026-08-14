@@ -24,16 +24,17 @@
     // 设置基准日期为今天
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-    document.getElementById('calcDate').value = todayStr;
+    const calcDateEl = document.getElementById('calcDate');
+    calcDateEl.value = todayStr;
     baseDate = new Date(todayStr + 'T00:00:00');
-    // 监听日期变化
-    document.getElementById('calcDate').addEventListener('change', function(e) {
-      const val = e.target.value;
+
+    // 统一处理基准日期变化
+    function applyBaseDate(val) {
       if (val) {
         baseDate = new Date(val + 'T00:00:00');
       } else {
         baseDate = new Date();
-        document.getElementById('calcDate').value = new Date().toISOString().slice(0,10);
+        calcDateEl.value = new Date().toISOString().slice(0,10);
       }
       renderStats();
       renderTable();
@@ -43,7 +44,13 @@
         renderCalendar();
       }
       if (currentView === 'waterfall') renderWaterfall();
-    });
+    }
+    // 方向键交给原生 <input type="date"> 处理：
+    // 选中某段（年/月/日）后用 ←/→ 在段间移动焦点，↑/↓ 在该段 ±1，
+    // 并在月末/年末自动跨月/跨年。挂 input 事件保证按键即时刷新视图。
+    const onDateChange = e => applyBaseDate(e.target.value);
+    calcDateEl.addEventListener('change', onDateChange);
+    calcDateEl.addEventListener('input', onDateChange);
     renderStats();
     renderTable();
     updateFilterCounts();
@@ -152,9 +159,15 @@
     document.querySelector('.table-wrapper').style.display = view === 'list' ? 'block' : 'none';
     document.getElementById('calendarView').style.display = view === 'calendar' ? 'block' : 'none';
     document.getElementById('waterfallView').style.display = view === 'waterfall' ? 'block' : 'none';
-    // 列表视图显示新增按钮，日历/瀑布流视图显示模式切换
-    document.getElementById('listAddBtn').style.display = view === 'list' ? 'inline-flex' : 'none';
+    // 列表视图显示新增按钮，日历/瀑布流视图显示模式切换；组合组仅在列表视图显示
+    const inCombo = (typeof comboMode !== 'undefined') && comboMode;
+    document.getElementById('listAddBtn').style.display = (view === 'list' && !inCombo) ? 'inline-flex' : 'none';
+    const comboToggleGroup = document.getElementById('comboToggleGroup');
+    if (comboToggleGroup) comboToggleGroup.style.display = view === 'list' ? 'inline-flex' : 'none';
     document.getElementById('calendarModeToggle').style.display = (view === 'calendar' || view === 'waterfall') ? 'inline-flex' : 'none';
+    // 非列表视图下隐藏整个 header-ops，避免空容器在 flex 流中产生的两侧 gap
+    const headerOps = document.querySelector('.header-ops');
+    if (headerOps) headerOps.style.display = view === 'list' ? 'inline-flex' : 'none';
     // 从列表视图切换到日历/瀑布流时，默认选择「缴费及领取」；日历⇄瀑布流切换则保持原筛选不变
     if (prevView === 'list' && (view === 'calendar' || view === 'waterfall')) {
       calendarMode = 'all';
@@ -830,6 +843,7 @@
           return p;
         });
         syncAllTransferRecords(); // 启动加载后，从年金险元数据自愈万能账户转入记录
+        updateSaveHint();
       } catch (e) {
         policies = [];
       }
@@ -838,6 +852,26 @@
 
   function saveData() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(policies));
+    updateSaveHint();
+  }
+
+  function updateSaveHint() {
+    const el = document.getElementById('saveTimeLabel');
+    if (!el) return;
+    let latest = null;
+    for (const p of policies) {
+      if (p && p.updatedAt) {
+        const t = new Date(p.updatedAt).getTime();
+        if (!isNaN(t) && (latest === null || t > latest)) latest = t;
+      }
+    }
+    if (latest === null) {
+      el.textContent = '暂无记录';
+      return;
+    }
+    const d = new Date(latest);
+    const pad = n => String(n).padStart(2, '0');
+    el.textContent = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
   function calcPaidYears(startDate, paymentTerm, baseDate) {
     if (!startDate) return 0;
@@ -967,10 +1001,28 @@
       if (statuses.includes('年金领取')) annuityCount++;
       if (statuses.includes('满期')) matureCount++;
     });
+    // 万能账户：历年资金出入流水（入-出）累加进"总的累计已交保费"
+    // 投入(入)按扣手续费前金额计；提出(出)按扣手续费后(含手续费)金额计
+    // 仅统计 fundFlows（年金转入明细 transferRecords 不计入）；只统计 日期<=基准日的流水（不限年份）
+    let totalFundFlow = 0;
+    activeData.forEach(p => {
+      if (!p.universalAccount || !p.universalAccount.fundFlows) return;
+      p.universalAccount.fundFlows.forEach(f => {
+        if (!f.date || isNaN(new Date(f.date).getTime())) return;
+        const fDate = new Date(f.date);
+        fDate.setHours(0, 0, 0, 0);                   // 归一到当地零点，按日期精确比较
+        if (fDate > today) return;                    // 只统计 日期<=基准日的流水（不限年份）
+        const amt = parseFloat(f.amount) || 0;
+        const fee = amt * (parseFloat(f.feeRate) || 0) / 100;
+        if (f.flowType === 'out') totalFundFlow -= (amt + fee); // 出：扣手续费后(含费)
+        else totalFundFlow += amt;                              // 入：扣手续费前
+      });
+    });
+
     const totalPaidPremium = activeData.reduce((sum, p) => {
       const paidYears = calcPaidYears(p.startDate, p.paymentTerm, today);
       return sum + (parseFloat(p.annualPremium) || 0) * paidYears;
-    }, 0);
+    }, 0) + totalFundFlow;
 
     const currentYear = today.getFullYear();
     let paidCount = 0, paidAmount = 0;
@@ -1013,11 +1065,32 @@
       }
     });
 
+    // 万能账户：基于基准日期，当年资金出入流水表 入 - 出，累加进"当年累计已交"
+    // 投入(入)按扣手续费前金额计；提出(出)按扣手续费后(含手续费)金额计
+    // 仅统计 fundFlows（年金转入明细 transferRecords 不计入）
+    activeData.forEach(p => {
+      if (!p.universalAccount || !p.universalAccount.fundFlows) return;
+      p.universalAccount.fundFlows.forEach(f => {
+        if (!f.date || isNaN(new Date(f.date).getTime())) return;
+        const fDate = new Date(f.date);
+        fDate.setHours(0, 0, 0, 0);                   // 归一到当地零点，按日期精确比较
+        if (fDate.getFullYear() !== currentYear || fDate > today) return; // 只统计 基准日期同年 且 日期<=基准日的流水
+        const amt = parseFloat(f.amount) || 0;
+        const fee = amt * (parseFloat(f.feeRate) || 0) / 100;
+        if (f.flowType === 'out') paidAmount -= (amt + fee); // 出：扣手续费后(含费)
+        else paidAmount += amt;                              // 入：扣手续费前
+      });
+    });
+
     document.getElementById('stats').innerHTML = `
       <div class="stats-row-5">
         <div class="stat-card">
           <div class="stat-label">保单总数</div>
-          <div class="stat-value" >${totalAll} 份 / <span style="color:#059669;">有效 ${total}</span> / <span style="color:#9ca3af;font-size:14px;">另不计入 ${excludedCount}</span></div>
+          <div class="stat-value" style="display:inline-flex; align-items:center; gap:8px; font-size:18px;">
+            <span>${totalAll} 份</span>
+            <span style="color:#059669; font-size:15px;"> / 有效 ${total} / </span>
+            <span style="color:#9ca3af; font-size:14px;">另不计入 ${excludedCount}</span>
+          </div>
         </div>
         <div class="stat-card">
           <div class="stat-label">保单状态分布</div>
