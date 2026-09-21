@@ -57,6 +57,10 @@
     document.getElementById('surrenderAmount').value = '';
     document.getElementById('hasOtherIncome').checked = false;
     document.getElementById('excludedFromSummary').checked = false;
+    const drRateAdd = document.getElementById('dividendRealizationRate');
+    if (drRateAdd) drRateAdd.value = '';
+    const drToggleAdd = document.getElementById('perYearRateOverride');
+    if (drToggleAdd) drToggleAdd.checked = true;
     document.getElementById('transferToUA').checked = false;
     document.getElementById('linkedUAPolicy').value = '';
     document.getElementById('linkedUAPolicy').style.display = 'none';
@@ -133,6 +137,10 @@
     }
     document.getElementById('hasOtherIncome').checked = policy.hasOtherIncome || false;
     document.getElementById('excludedFromSummary').checked = policy.excludedFromSummary || false;
+    const drRateDet = document.getElementById('dividendRealizationRate');
+    if (drRateDet) drRateDet.value = policy.dividendRealizationRate || '';
+    const drToggleDet = document.getElementById('perYearRateOverride');
+    if (drToggleDet) drToggleDet.checked = policy.perYearRateOverride !== false;
     toggleSurrenderFields();
     updateAnnuityStartLabel();
     toggleCoverageInput();
@@ -573,6 +581,7 @@
           insuredAgeAtYear: ia > 0 ? ia + r.year - 1 : 0,
           cashValue: r.accountValue,
           cumDividend: 0,
+          cumDividendAllocated: 0,
           cumAnnuity: 0,
           maturityAmt: 0,
           cumPremium: (opts && opts.excludeTransferPremium) ? r.cumActiveIn : r.cumTotalIn,
@@ -626,17 +635,22 @@
       if (maxYearByAge < maxYear) maxYear = maxYearByAge;
     }
 
+    // 折算后累计红利序列（已分配全额 + 未分配×实现率）
+    const dividendSeries = hasDividend ? computeEffectiveDividendSeries(sorted, policy) : null;
+
     const rows = [];
     let cumDividend = 0;
+    let cumDividendAllocated = 0;
     let cumAnnuity = 0;
 
     for (let y = 1; y <= maxYear; y++) {
       // 满期当年现金价值=0（满期金替代），但年金和红利仍需计入满期当年
       const cv = (maturityYear !== null && y >= maturityYear) ? 0 : interpolateValue(sorted, y, 'cashValue');
       const stopBeyondMaturity = maturityYear !== null && y > maturityYear;
-      // 累计红利（满期次年起停止）
+      // 累计红利（折算后；满期次年起停止）
       if (hasDividend && !stopBeyondMaturity) {
-        cumDividend = interpolateValue(sorted, y, 'dividend');
+        cumDividend = interpolateValue(dividendSeries, y, 'dividend');
+        cumDividendAllocated = interpolateValue(dividendSeries, y, 'allocated');
       }
       // 累计年金：满期次年停止；手动模式从表格取值，非手动用固定公式
       if (!stopBeyondMaturity) {
@@ -680,6 +694,7 @@
         insuredAgeAtYear: insuredAge > 0 ? insuredAge + y - 1 : 0,
         cashValue: cv,
         cumDividend,
+        cumDividendAllocated,
         cumAnnuity,
         maturityAmt: matAmt,
         cumPremium,
@@ -696,6 +711,27 @@
     return computeSinglePolicyRows(getCurrentFormPolicy());
   }
 
+  // 组合内"被其它保单关联转入"的万能保单 id 集合（用于避免累计保费重复计入转入的年金）
+  function collectLinkedUAIds(policyList) {
+    const ids = new Set((policyList || []).map(p => p.id));
+    const result = new Set();
+    (policyList || []).forEach(p => {
+      if (!p.linkedUAPolicyId || !ids.has(p.linkedUAPolicyId)) return;
+      const ua = policyList.find(q => q.id === p.linkedUAPolicyId);
+      if (ua && ua.designType === '万能型' && ua.universalAccount &&
+          Array.isArray(ua.universalAccount.fundFlows) && ua.universalAccount.fundFlows.length > 0) {
+        result.add(ua.id);
+      }
+    });
+    return result;
+  }
+
+  // 取保单投保年份（无有效日期回退 1）
+  function getPolicyStartYear(p) {
+    const d = p && p.startDate ? new Date(p.startDate) : null;
+    return (d && !isNaN(d.getTime())) ? d.getFullYear() : 1;
+  }
+
   // 判断是否为"关联年金+万能"组合：
   // 恰两张保单、一张带 linkedUAPolicyId 的年金 + 一张带 fundFlows 的万能，
   // 且万能 transferRecords 中存在 sourcePolicyId === 年金.id。
@@ -710,35 +746,48 @@
     return { annuity, ua };
   }
 
-  // 组合（两张保单）合并利益行：按持有年度对齐叠加各分量
+  // 组合（N 张）合并利益行：按「公历年份」对齐叠加各分量
+  //   - 每张保单先算出其"保单年度"行（复用 computeSinglePolicyRows）
+  //   - 该保单第 k 个保单年度对应公历年 = startYear + k - 1
+  //   - 逐公历年对齐：py<1（未生效）或 py>行数（超出该保单演示期）→ 贡献 0
   function computeComboBenefitData(policyList) {
     if (!policyList || policyList.length === 0) return null;
-    const combo = isLinkedAnnuityUACombo(policyList);
-    const allRows = policyList.map(p => {
-      if (combo && p.designType === '万能型') {
-        // 关联组合：万能累计保费不含年金转入
-        return computeSinglePolicyRows(p, { excludeTransferPremium: true });
-      }
-      return computeSinglePolicyRows(p);
+    const linkedUAIds = collectLinkedUAIds(policyList);
+    const infos = policyList.map(p => {
+      const opts = linkedUAIds.has(p.id) ? { excludeTransferPremium: true } : undefined;
+      const rows = computeSinglePolicyRows(p, opts) || [];
+      return { p, rows, startYear: getPolicyStartYear(p) };
     });
-    if (allRows.some(r => !r || r.length === 0)) return null;
-    const maxLen = Math.max(...allRows.map(r => r.length));
+    if (infos.some(info => info.rows.length === 0)) return null;
+
+    const baseYear = Math.min(...infos.map(info => info.startYear));
+    const maxCalYear = Math.max(...infos.map(info => info.startYear + info.rows.length - 1));
+    // 基准保单 = 最早投保者，用于"被保人年龄"列
+    const baseInfo = infos.reduce((acc, info) => (info.startYear < acc.startYear ? info : acc), infos[0]);
+    const baseAge = parseInt(baseInfo.p.insuredAge) || 0;
+
     const merged = [];
-    for (let i = 0; i < maxLen; i++) {
-      const parts = allRows.map(r => r[i]).filter(Boolean);
-      if (parts.length === 0) break;
-      const year = parts[0].year;
-      const insuredAgeAtYear = parts[0].insuredAgeAtYear;
+    for (let CY = baseYear; CY <= maxCalYear; CY++) {
+      const parts = [];
+      infos.forEach(info => {
+        const py = CY - info.startYear + 1; // 该保单的第 py 个保单年度
+        if (py < 1 || py > info.rows.length) return; // 未生效 / 已超演示期 → 不计入
+        parts.push(info.rows[py - 1]);
+      });
+      if (parts.length === 0) continue;
       const sum = (k) => parts.reduce((a, r) => a + (parseFloat(r[k]) || 0), 0);
       const cashValue = sum('cashValue');
       const cumDividend = sum('cumDividend');
+      const cumDividendAllocated = sum('cumDividendAllocated');
       const cumAnnuity = sum('cumAnnuity');
       const maturityAmt = sum('maturityAmt');
       const cumPremium = sum('cumPremium');
       const cumOtherIncome = sum('cumOtherIncome');
       const totalBenefit = cashValue + cumDividend + cumAnnuity + maturityAmt;
       const totalBenefitWithOther = totalBenefit + cumOtherIncome;
-      merged.push({ year, insuredAgeAtYear, cashValue, cumDividend, cumAnnuity, maturityAmt, cumPremium, totalBenefit, cumOtherIncome, totalBenefitWithOther });
+      const year = CY - baseYear + 1; // 组合年序号（1 基，用于选中/IRR 对齐）
+      const insuredAgeAtYear = baseAge > 0 ? baseAge + (CY - baseInfo.startYear) : 0;
+      merged.push({ year, calYear: CY, insuredAgeAtYear, cashValue, cumDividend, cumDividendAllocated, cumAnnuity, maturityAmt, cumPremium, cumOtherIncome, totalBenefit, totalBenefitWithOther });
     }
     return merged;
   }
@@ -885,6 +934,9 @@
     const canvas = document.getElementById(bctx.canvasId);
     const tooltip = document.getElementById(bctx.tooltipId);
     const mode = bctx.mode;
+    // 年份展示回调：组合上下文显示公历年份，单保单保持"保单年度"（默认）
+    const yearLabel = (r) => (bctx.yearDisplayFn ? bctx.yearDisplayFn(r) : r.year);
+    const yearTitle = (r) => (bctx.yearTitleFn ? bctx.yearTitleFn(r) : ('第 ' + r.year + ' 保单年度'));
     const dpr = window.devicePixelRatio || 1;
     const rect = container.getBoundingClientRect();
     const w = rect.width;
@@ -1003,10 +1055,11 @@
 
       // 更新tooltip
       tooltip.innerHTML = `
-        <div class="tt-year">第 ${rr.year} 保单年度${rr.insuredAgeAtYear > 0 ? '（被保人' + rr.insuredAgeAtYear + '岁）' : ''}</div>
+        <div class="tt-year">${yearTitle(rr)}${rr.insuredAgeAtYear > 0 ? '（被保人' + rr.insuredAgeAtYear + '岁）' : ''}</div>
         <div class="tt-row"><span class="tt-label">累计保费</span><span class="tt-val">${showAmounts ? '¥' + formatMoney(rr.cumPremium) : '¥***'}</span></div>
         <div class="tt-row"><span class="tt-label">现金价值</span><span class="tt-val">${showAmounts ? '¥' + formatMoney(rr.cashValue) : '¥***'}</span></div>
         <div class="tt-row"><span class="tt-label">累计红利</span><span class="tt-val">${showAmounts ? '¥' + formatMoney(rr.cumDividend) : '¥***'}</span></div>
+        ${rr.cumDividend > 0 ? `<div class="tt-row" style="font-size:11px;opacity:0.85;"><span class="tt-label">已实现 / 折算后未实现</span><span class="tt-val">${showAmounts ? '¥' + formatMoney(rr.cumDividendAllocated || 0) + ' / ¥' + formatMoney((rr.cumDividend || 0) - (rr.cumDividendAllocated || 0)) : '¥***'}</span></div>` : ''}
         <div class="tt-row"><span class="tt-label">累计年金</span><span class="tt-val">${showAmounts ? '¥' + formatMoney(rr.cumAnnuity) : '¥***'}</span></div>
         <div class="tt-row"><span class="tt-label">满期金</span><span class="tt-val">${showAmounts ? '¥' + formatMoney(rr.maturityAmt) : '¥***'}</span></div>
         <div class="tt-row" style="border-top:1px solid rgba(255,255,255,0.2);margin-top:4px;padding-top:4px;"><span class="tt-label" style="color:#fbbf24;">生存总利益</span><span class="tt-val" style="color:#fbbf24;">${showAmounts ? '¥' + formatMoney(rr.totalBenefit) : '¥***'}</span></div>
@@ -1056,7 +1109,7 @@
         ctx.fillStyle = '#6b7280';
         ctx.font = '11px -apple-system, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(rows[i].year, xx, h - params2.pad.bottom + 18);
+        ctx.fillText(yearLabel(rows[i]), xx, h - params2.pad.bottom + 18);
       }
       // 图例
       ctx.fillStyle = '#1e40af'; ctx.fillRect(params2.pad.left, 8, 12, 3);
@@ -1125,7 +1178,7 @@
       // 网络 + 标签
       ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 0.5;
       for (let i = 0; i <= 5; i++) { const yy = params4.pad.top + (params4.ph / 5) * i; ctx.beginPath(); ctx.moveTo(params4.pad.left, yy); ctx.lineTo(w - params4.pad.right, yy); ctx.stroke(); const val = maxVal - (maxVal / 5) * i; ctx.fillStyle = '#6b7280'; ctx.font = '11px -apple-system, sans-serif'; ctx.textAlign = 'right'; ctx.fillText(showAmounts ? formatMoney(val) : '***', params4.pad.left - 6, yy + 4); }
-      for (let i = 0; i < rows.length; i += 5) { const xx = params4.x(i); ctx.fillStyle = '#6b7280'; ctx.font = '11px -apple-system, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(rows[i].year, xx, h - params4.pad.bottom + 18); }
+      for (let i = 0; i < rows.length; i += 5) { const xx = params4.x(i); ctx.fillStyle = '#6b7280'; ctx.font = '11px -apple-system, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(yearLabel(rows[i]), xx, h - params4.pad.bottom + 18); }
       ctx.fillStyle = '#1e40af'; ctx.fillRect(params4.pad.left, 8, 12, 3); ctx.fillStyle = '#374151'; ctx.font = '11px -apple-system, sans-serif'; ctx.textAlign = 'left'; ctx.fillText('累计已交保费', params4.pad.left + 16, 12);
       ctx.fillStyle = '#059669'; ctx.fillRect(params4.pad.left + 120, 8, 12, 3); ctx.fillText(getBenefitLabel(mode), params4.pad.left + 136, 12);
       ctx.strokeStyle = '#1e40af'; ctx.lineWidth = 2; ctx.setLineDash([]); ctx.beginPath(); rows.forEach((r, i) => { const xi = params4.x(i), yi = params4.y(r.cumPremium); if (i === 0) ctx.moveTo(xi, yi); else ctx.lineTo(xi, yi); }); ctx.stroke();
@@ -1155,7 +1208,8 @@
     const hasMaturity = rows.some(r => r.maturityAmt > 0);
     const annivYear = (bctx.annivYear !== undefined && bctx.annivYear !== null) ? bctx.annivYear : -1;
 
-    let cols = ['保单年度', '被保人年龄'];
+    const yearColLabel = bctx.yearColLabel || '保单年度';
+    let cols = [yearColLabel, '被保人年龄'];
     if (!bctx.hideAnnualPremium) cols.push('年交保费');
     cols.push('累计保费', '现金价值');
     if (hasDividend) cols.push('累计红利');
@@ -1170,7 +1224,7 @@
           const selClass = (bctx.sel.get() === r.year) ? ' selected' : '';
           const isAnniv = (annivYear === r.year);
           let row = `<tr class="${selClass}${isAnniv ? ' benefit-row-anniv' : ''}" onclick="${bctx.rowClickName}(${r.year})">`;
-          row += `<td>${r.year}</td>`;
+          row += `<td data-year="${r.year}">${bctx.yearDisplayFn ? bctx.yearDisplayFn(r) : r.year}</td>`;
           row += `<td>${r.insuredAgeAtYear > 0 ? r.insuredAgeAtYear : '-'}</td>`;
           if (!bctx.hideAnnualPremium) {
             row += `<td>${showAmounts ? formatMoney(Math.min(r.year, bctx.paymentTerm || 0) * (bctx.annualPremium || 0)) : '***'}</td>`;
@@ -1207,7 +1261,7 @@
   function updateBenefitTableSelection(bctx) {
     document.querySelectorAll('#' + bctx.tableId + ' tbody tr').forEach(tr => {
       const td = tr.querySelector('td');
-      if (td && parseInt(td.textContent) === bctx.sel.get()) {
+      if (td && td.dataset.year !== undefined && parseInt(td.dataset.year) === bctx.sel.get()) {
         tr.classList.add('selected');
       } else {
         tr.classList.remove('selected');
@@ -1222,7 +1276,7 @@
     if (!r) return;
     bctx.sel.set(r.year);
 
-    document.getElementById(bctx.summaryTitleId).textContent = `第 ${r.year} 保单年度利益测算`;
+    document.getElementById(bctx.summaryTitleId).textContent = bctx.summaryTitleFn ? bctx.summaryTitleFn(r) : ('第 ' + r.year + ' 保单年度利益测算');
     const sr = calcSimpleReturn(r, bctx.mode);
     const sEl = document.getElementById(bctx.bsSimpleId);
     sEl.textContent = sr.toFixed(2) + '%';
@@ -1253,7 +1307,7 @@
   }
 
   function calcIRR(selectedRow, allRows, policyList) {
-    if (policyList && policyList.length === 2) {
+    if (policyList && policyList.length >= 2) {
       return calcComboIRR(selectedRow, allRows, policyList);
     }
     const policy = getCurrentFormPolicy();
@@ -1469,15 +1523,15 @@
     const YEAR_MS = 365.25 * 24 * 3600 * 1000;
     const combo = isLinkedAnnuityUACombo(policyList);
     if (combo) return calcLinkedComboIRR(selectedRow, policyList, combo, YEAR_MS);
-    const starts = policyList.map(p => new Date(p.startDate));
-    const base0 = new Date(Math.min(starts[0].getTime(), starts[1].getTime()));
+    const starts = policyList.map(p => new Date(p.startDate).getTime()).filter(t => !isNaN(t));
+    const base0 = new Date(starts.length ? Math.min(...starts) : Date.now());
     const selectedGlobalYear = Math.max(0, (selectedRow.year - 1));
     const cashflows = [];
     const pushCF = (g, amt) => { cashflows[g] = (cashflows[g] || 0) + amt; };
 
     policyList.forEach(p => {
       const S = new Date(p.startDate);
-      const yearDiff = Math.round((S - base0) / YEAR_MS); // 0 或 1
+      const yearDiff = Math.round((S - base0) / YEAR_MS); // 相对最早投保日的年偏移
       if (p.designType === '万能型' && p.universalAccount && p.universalAccount.fundFlows && p.universalAccount.fundFlows.length > 0) {
         const uaResult = getUAResult(p);
         function bucket(dateStr) {
@@ -1571,7 +1625,11 @@
       hideAnnualPremium: true,
       rowClickName: 'comboBenefitTableRowClick',
       policyList: policyList,
-      defaultYearFn: (rs) => rs[0].year
+      defaultYearFn: (rs) => rs[0].year,
+      yearColLabel: '公历年份',
+      yearDisplayFn: (r) => r.calYear,
+      yearTitleFn: (r) => '公历 ' + r.calYear + ' 年末',
+      summaryTitleFn: (r) => '公历 ' + r.calYear + ' 年末利益测算'
     };
     renderBenefitView(rows, bctx);
   }
@@ -1599,7 +1657,11 @@
       hideAnnualPremium: true,
       rowClickName: 'comboBenefitTableRowClick',
       policyList: _comboPolicyList,
-      defaultYearFn: (rs) => rs[0].year
+      defaultYearFn: (rs) => rs[0].year,
+      yearColLabel: '公历年份',
+      yearDisplayFn: (r) => r.calYear,
+      yearTitleFn: (r) => '公历 ' + r.calYear + ' 年末',
+      summaryTitleFn: (r) => '公历 ' + r.calYear + ' 年末利益测算'
     };
     refreshBenefitSummaryOnly(rows, bctx);
     updateBenefitTableSelection(bctx);
@@ -1627,13 +1689,23 @@
     const hasOtherIncomeEl = document.getElementById('hasOtherIncome');
     const hasOtherIncome = hasOtherIncomeEl ? hasOtherIncomeEl.checked : false;
 
+    const rateToggleEl = document.getElementById('perYearRateOverride');
+    const rateInputEl = document.getElementById('dividendRealizationRate');
+    const showRateOverride = hasDividend && rateToggleEl && rateToggleEl.checked;
+    const defaultRateVal = rateInputEl ? rateInputEl.value : '';
+
+    document.getElementById('dividendConfigBar').style.display = hasDividend ? 'flex' : 'none';
     document.getElementById('dividendColHeader').style.display = hasDividend ? '' : 'none';
     document.getElementById('distributedColHeader').style.display = hasDividend ? '' : 'none';
+    document.getElementById('realizationRateColHeader').style.display = showRateOverride ? '' : 'none';
+    document.getElementById('effectiveDividendColHeader').style.display = hasDividend ? '' : 'none';
     document.getElementById('annuityColHeader').style.display = showManualAnnuity ? '' : 'none';
     document.getElementById('transferColHeader').style.display = showTransferToUA ? '' : 'none';
     document.getElementById('otherIncomeColHeader').style.display = hasOtherIncome ? '' : 'none';
     document.getElementById('transferBatchOps').style.display = showTransferToUA ? 'flex' : 'none';
     const isDisabled = document.getElementById('company').disabled;
+    if (rateInputEl) rateInputEl.disabled = isDisabled;
+    if (rateToggleEl) rateToggleEl.disabled = isDisabled;
     document.getElementById('dividendPasteHint').style.display = hasDividend ? 'inline' : 'none';
     document.getElementById('annuityPasteHint').style.display = showManualAnnuity ? 'inline' : 'none';
     document.getElementById('cashValueColLabel').textContent = isAnnuity ? '现金价值-不含年金（元）' : '现金价值（元）';
@@ -1642,8 +1714,24 @@
     // 数字字段兜底：把 "-"、非法字符串等脏值清成空，避免 <input type="number"> 报解析错误
     const safeNum = (v) => (v === '' || v === null || v === undefined) ? '' : (isFinite(Number(v)) ? v : '');
 
+    // 折算后累计红利（按保单年度映射，用于只读列实时展示）
+    const dividendMap = {};
+    if (hasDividend) {
+      const sortedRows = cashValues
+        .map(r => ({ ...r, year: parseInt(r.year) || 0 }))
+        .sort((a, b) => a.year - b.year);
+      const series = computeEffectiveDividendSeries(sortedRows, {
+        designType: '分红型',
+        dividendRealizationRate: defaultRateVal,
+        perYearRateOverride: !!(rateToggleEl && rateToggleEl.checked)
+      });
+      series.forEach(s => { dividendMap[s.year] = s.dividend; });
+    }
+    const fmtEff = (v) => (v === undefined || v === null || !isFinite(Number(v))) ? '-' : formatMoney(Number(v));
+
     let totalCols = 3; // year, cashValue, actions
-    if (hasDividend) totalCols += 2; // dividend + distributed
+    if (hasDividend) totalCols += 3; // dividend + distributed + effective
+    if (showRateOverride) totalCols += 1;
     if (showManualAnnuity) totalCols += 1;
     if (showTransferToUA) totalCols += 1;
     if (hasOtherIncome) totalCols += 1;
@@ -1652,17 +1740,25 @@
       body.innerHTML = '<tr><td colspan="' + totalCols + '" style="color:#9ca3af;padding:20px;">暂无现金价值数据</td></tr>';
     } else {
       const disabledAttr = isDisabled ? ' disabled' : '';
-      body.innerHTML = cashValues.map((cv, i) => `
-        <tr>
+      body.innerHTML = cashValues.map((cv, i) => {
+        const allocRaw = cv.distributedAmount;
+        const hasAlloc = !(allocRaw === '' || allocRaw === null || allocRaw === undefined) && isFinite(Number(allocRaw));
+        const demoAmt = parseFloat(cv.dividend);
+        const hasDemo = isFinite(demoAmt) && demoAmt > 0;
+        const rowClass = hasDividend ? (hasAlloc ? 'dv-row-allocated' : (hasDemo ? 'dv-row-projected' : '')) : '';
+        const effVal = hasDividend ? dividendMap[parseInt(cv.year) || (i + 1)] : null;
+        return `
+        <tr class="${rowClass}">
           <td><input type="number" value="${safeNum(cv.year)}" placeholder="${i+1}" min="1" onchange="updateCashValueField(${i},'year',this.value)"${disabledAttr}></td>
           <td><input type="number" value="${safeNum(cv.cashValue)}" placeholder="0" min="0" step="0.01" onchange="updateCashValueField(${i},'cashValue',this.value)"${disabledAttr}></td>
-          ${hasDividend ? `<td><input type="number" value="${safeNum(cv.dividend)}" placeholder="0" min="0" step="0.01" onchange="updateCashValueField(${i},'dividend',this.value)"${disabledAttr}></td><td style="text-align:center;"><input type="checkbox" ${cv.distributed ? 'checked' : ''} onchange="updateCashValueField(${i},'distributed',this.checked)"${disabledAttr}></td>` : ''}
+          ${hasDividend ? `<td><input type="number" value="${safeNum(cv.dividend)}" placeholder="0" min="0" step="0.01" onchange="updateCashValueField(${i},'dividend',this.value)"${disabledAttr}></td><td><input type="number" value="${safeNum(cv.distributedAmount)}" placeholder="未分配" min="0" step="0.01" onchange="updateCashValueField(${i},'distributedAmount',this.value)"${disabledAttr}></td>${showRateOverride ? `<td><input type="number" value="${safeNum(cv.realizationRate)}" placeholder="${defaultRateVal !== '' ? defaultRateVal : '100'}" min="0" step="0.01" onchange="updateCashValueField(${i},'realizationRate',this.value)"${disabledAttr}></td>` : ''}<td class="dv-effective-cell">${fmtEff(effVal)}</td>` : ''}
           ${showManualAnnuity ? `<td><input type="number" value="${safeNum(cv.annuityAmount)}" placeholder="0" min="0" step="0.01" onchange="updateCashValueField(${i},'annuityAmount',this.value)"${disabledAttr}></td>` : ''}
           ${showTransferToUA ? `<td style="text-align:center;"><input type="checkbox" ${cv.transferToUA ? 'checked' : ''} onchange="updateCashValueField(${i},'transferToUA',this.checked)"${disabledAttr}></td>` : ''}
           ${hasOtherIncome ? `<td><input type="number" value="${safeNum(cv.otherIncome)}" placeholder="0" min="0" step="0.01" onchange="updateCashValueField(${i},'otherIncome',this.value)"${disabledAttr}></td>` : ''}
           <td>${isDisabled ? '' : `<button type="button" class="del-row-btn" onclick="removeCashValueRow(${i})" title="删除">×</button>`}</td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
     }
   }
 
@@ -1695,7 +1791,7 @@
     } else {
       arr = getTempCashValues();
     }
-    arr.push({ year: arr.length + 1, cashValue: '', dividend: '', distributed: false, annuityAmount: '', otherIncome: '', transferToUA: false });
+    arr.push({ year: arr.length + 1, cashValue: '', dividend: '', distributedAmount: '', realizationRate: '', annuityAmount: '', otherIncome: '', transferToUA: false });
     if (policy && policy.cashValues) {
       policy.cashValues = arr;
     } else {
@@ -1741,7 +1837,7 @@
       arr = getTempCashValues();
     }
     if (arr[index]) {
-      const numericFields = ['year','cashValue','dividend','annuityAmount','otherIncome'];
+      const numericFields = ['year','cashValue','dividend','distributedAmount','realizationRate','annuityAmount','otherIncome'];
       if (numericFields.includes(field)) {
         // 只保存合法数字或空；拦截单独的 "-" 等非法值，避免脏数据写入
         arr[index][field] = (value === '' || value === null || value === undefined)
@@ -1793,12 +1889,13 @@
           dividend: hasDividend && parts.length >= 3 ? parts[2].replace(/,/g, '') : '',
           annuityAmount: annuityAmt,
           otherIncome: otherInc,
-          distributed: false,
+          distributedAmount: '',
+          realizationRate: '',
           transferToUA: false
         };
         arr.push(item);
       } else if (parts.length === 1 && !isNaN(parts[0])) {
-        arr.push({ year: arr.length + 1, cashValue: parts[0].replace(/,/g, ''), dividend: '', annuityAmount: '', otherIncome: '', distributed: false, transferToUA: false });
+        arr.push({ year: arr.length + 1, cashValue: parts[0].replace(/,/g, ''), dividend: '', distributedAmount: '', realizationRate: '', annuityAmount: '', otherIncome: '', transferToUA: false });
       }
     });
     if (policy && policy.cashValues) {
@@ -1842,6 +1939,10 @@
       }
     }
       document.getElementById('hasOtherIncome').checked = policy.hasOtherIncome || false;
+      const drRateDis = document.getElementById('dividendRealizationRate');
+      if (drRateDis) drRateDis.value = policy.dividendRealizationRate || '';
+      const drToggleDis = document.getElementById('perYearRateOverride');
+      if (drToggleDis) drToggleDis.checked = policy.perYearRateOverride !== false;
       document.getElementById('remarks').value = policy.remarks || '';
       toggleSurrenderFields();
       toggleCoverageInput();
@@ -1975,6 +2076,8 @@
       linkedUAPolicyId: document.getElementById('transferToUA').checked ? document.getElementById('linkedUAPolicy').value : '',
       hasOtherIncome: document.getElementById('hasOtherIncome').checked,
       excludedFromSummary: document.getElementById('excludedFromSummary').checked,
+      dividendRealizationRate: document.getElementById('dividendRealizationRate').value,
+      perYearRateOverride: document.getElementById('perYearRateOverride').checked,
       cashValues: (function() {
         const cv = getFormCashValues();
         // 取消勾选"年金转入万能"时，清除所有现价行中的转万能标记
@@ -2158,7 +2261,7 @@
         const data = JSON.parse(e.target.result);
         if (Array.isArray(data)) {
           if (confirm(`确定要导入 ${data.length} 条保单数据吗？\n（将覆盖现有数据）`)) {
-            policies = data;
+            policies = migratePolicies(data);
             syncAllTransferRecords(); // 导入后从年金险元数据重建万能账户转入记录
             saveData();
             renderStats();

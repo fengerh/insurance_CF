@@ -2,22 +2,15 @@
   let comboMode = false;
   let comboSelectedIds = [];
 
-  function comboDateDiffYears(a, b) {
-    const d1 = a && a.startDate ? new Date(a.startDate).getTime() : NaN;
-    const d2 = b && b.startDate ? new Date(b.startDate).getTime() : NaN;
-    if (isNaN(d1) || isNaN(d2)) return Infinity;
-    return Math.abs((d1 - d2) / (365.25 * 24 * 3600 * 1000));
-  }
-
-  function comboDateOk(a, b) {
-    return comboDateDiffYears(a, b) <= 1;
-  }
+  // 组合利益演示最多可选保单数
+  const COMBO_MAX = 6;
 
   function updateComboStartBtn() {
     const btn = document.getElementById('comboStartBtn');
     if (!btn) return;
-    btn.disabled = comboSelectedIds.length !== 2;
-    btn.classList.toggle('active', comboSelectedIds.length === 2);
+    const n = comboSelectedIds.length;
+    btn.disabled = n < 2;
+    btn.classList.toggle('active', n >= 2);
   }
 
   function toggleComboMode() {
@@ -52,19 +45,10 @@
 
   function onComboCheck(id, el) {
     if (el.checked) {
-      if (comboSelectedIds.length >= 2) {
+      if (comboSelectedIds.length >= COMBO_MAX) {
         el.checked = false;
-        alert('组合利益演示最多选择两个保单');
+        alert('组合利益演示最多选择 ' + COMBO_MAX + ' 张保单');
         return;
-      }
-      if (comboSelectedIds.length === 1) {
-        const prev = policies.find(p => p.id === comboSelectedIds[0]);
-        const cur = policies.find(p => p.id === id);
-        if (prev && cur && !comboDateOk(prev, cur)) {
-          el.checked = false;
-          alert('两张保单投保日期相差不能超过 1 年，无法组合演示');
-          return;
-        }
       }
       comboSelectedIds.push(id);
     } else {
@@ -85,21 +69,18 @@
   }
 
   function startComboBenefit() {
-    if (comboSelectedIds.length !== 2) {
-      alert('请先选择两个保单');
+    if (comboSelectedIds.length < 2) {
+      alert('请至少选择两张保单');
       return;
     }
     const selected = comboSelectedIds.map(id => policies.find(p => p.id === id)).filter(Boolean);
-    if (selected.length !== 2) return;
-    if (!comboDateOk(selected[0], selected[1])) {
-      alert('两张保单投保日期相差不能超过 1 年，无法组合演示');
-      return;
-    }
-    // 设置副标题
+    if (selected.length < 2) return;
+    // 设置副标题：列出全部所选保单
     const sub = document.getElementById('comboBenefitSubtitle');
     if (sub) {
-      sub.textContent = `组合：${selected[0].productName || selected[0].company || '保单1'} ＋ ${selected[1].productName || selected[1].company || '保单2'}` +
-        `（投保日期 ${selected[0].startDate || '-'} / ${selected[1].startDate || '-'}）`;
+      const names = selected.map((p, i) => (p.productName || p.company || ('保单' + (i + 1))));
+      const dates = selected.map(p => p.startDate || '-').join(' / ');
+      sub.textContent = `组合（${selected.length} 张）：${names.join(' ＋ ')}（投保日期 ${dates}）`;
     }
     openComboBenefitModal();
     if (typeof renderComboBenefit === 'function') renderComboBenefit(selected);
@@ -160,18 +141,11 @@
       const paidYears = calcPaidYears(p.startDate, p.paymentTerm, baseDate);
       const checked = comboMode && comboSelectedIds.includes(p.id) ? 'checked' : '';
       let disabled = '';
-      if (comboMode) {
-        if (comboSelectedIds.length >= 2 && !comboSelectedIds.includes(p.id)) {
-          disabled = 'disabled'; // 已选两张，禁止再选第三张
-        } else if (comboSelectedIds.length === 1 && !comboSelectedIds.includes(p.id)) {
-          const baseP = policies.find(x => x.id === comboSelectedIds[0]);
-          if (baseP && !comboDateOk(baseP, p)) {
-            disabled = 'disabled'; // 与首张保单投保日期相差超过 1 年，置灰
-          }
-        }
+      if (comboMode && comboSelectedIds.length >= COMBO_MAX && !comboSelectedIds.includes(p.id)) {
+        disabled = 'disabled'; // 已选满上限，禁止再选
       }
       const seqCell = comboMode
-        ? `<td style="text-align:center;"><input type="checkbox" class="combo-chk" data-id="${p.id}" ${checked} ${disabled} ${disabled ? 'title="投保日期与已选保单相差超过 1 年，不可组合"' : ''} onchange="onComboCheck('${p.id}', this)"></td>`
+        ? `<td style="text-align:center;"><input type="checkbox" class="combo-chk" data-id="${p.id}" ${checked} ${disabled} ${disabled ? 'title="最多选择 ' + COMBO_MAX + ' 张保单"' : ''} onchange="onComboCheck('${p.id}', this)"></td>`
         : `<td style="text-align:center;color:#9ca3af;">${index + 1}</td>`;
       const actionsCell = comboMode
         ? `<td><div class="actions"><button class="action-btn action-edit" disabled>详情</button><button class="action-btn action-delete" disabled>删除</button></div></td>`

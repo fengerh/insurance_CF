@@ -502,6 +502,21 @@
     font-size: 16px;
     padding: 2px 6px;
   }
+  /* 分红：已分配（已实现）行 / 未分配（折算）行 着色，直观呈现交接年度 */
+  .cash-value-table tr.dv-row-allocated td { background: #f0fdf4; }
+  .cash-value-table tr.dv-row-allocated td:first-child { box-shadow: inset 3px 0 0 #22c55e; }
+  .cash-value-table tr.dv-row-projected td { background: #fffbeb; }
+  .cash-value-table tr.dv-row-projected td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
+  .cash-value-table td.dv-effective-cell {
+    font-weight: 600;
+    color: #059669;
+    background: #ecfdf5;
+    white-space: nowrap;
+  }
+  .cash-value-table tr.dv-row-projected td.dv-effective-cell {
+    color: #d97706;
+    background: #fef3c7;
+  }
   .batch-paste-area {
     margin-bottom: 12px;
   }

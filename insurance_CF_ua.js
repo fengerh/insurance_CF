@@ -446,7 +446,8 @@
       year: r.year,
       cashValue: r.netValue,
       dividend: '',
-      distributed: false,
+      distributedAmount: '',
+      realizationRate: '',
       annuityAmount: '',
       otherIncome: '',
       // Universal account fund flow data for benefit display

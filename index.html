@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>保单管理工具 v20260814.1400</title>
+<title>保单管理工具 v20260921.1440</title>
 <link rel="stylesheet" href="insurance_CF.css">
 
 </head>
@@ -209,7 +209,7 @@
           </div>
           <div class="form-group">
             <label>设计类型</label>
-            <select id="designType">
+            <select id="designType" onchange="updateCashValueTable()">
               <option value="">请选择</option>
               <option value="普通型">普通型</option>
               <option value="分红型">分红型</option>
@@ -409,13 +409,28 @@
           <button type="button" class="btn btn-secondary btn-sm" onclick="batchSetTransfer(false)">全部取消转入</button>
           <span style="font-size:11px;color:#6b7280;">（仅对年金金额>0的行生效）</span>
         </div>
+        <div id="dividendConfigBar" style="display:none;margin-bottom:8px;padding:8px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;align-items:center;gap:16px;flex-wrap:wrap;">
+          <label style="font-size:13px;font-weight:600;color:#166534;display:flex;align-items:center;gap:6px;white-space:nowrap;">
+            分红实现率（%）
+            <input type="number" id="dividendRealizationRate" placeholder="默认 100" min="0" step="0.01" style="width:90px;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:13px;" onchange="updateCashValueTable()">
+          </label>
+          <label style="font-size:13px;color:#166534;display:flex;align-items:center;gap:6px;white-space:nowrap;margin:0;">
+            <input type="checkbox" id="perYearRateOverride" checked onchange="updateCashValueTable()">
+            逐年覆盖（按保单年度单独设置实现率）
+          </label>
+          <span style="font-size:12px;color:#4b5563;line-height:1.4;">
+            已分配年度按「累计已分配」全额计入；未分配年度按「当年演示红利增量 × 实现率」累加。
+          </span>
+        </div>
         <table class="cash-value-table" id="cashValueTable">
           <thead>
             <tr>
-              <th style="width:18%;">保单年度</th>
-              <th style="width:26%;"><span id="cashValueColLabel">现金价值（元）</span></th>
-              <th style="width:18%;" id="dividendColHeader" style="display:none;">累计年度红利（元）</th>
-              <th style="width:6%;" id="distributedColHeader" style="display:none;">已分配</th>
+              <th style="width:14%;">保单年度</th>
+              <th style="width:20%;"><span id="cashValueColLabel">现金价值（元）</span></th>
+              <th style="width:16%;" id="dividendColHeader" style="display:none;">累计年度红利（元）</th>
+              <th style="width:16%;" id="distributedColHeader" style="display:none;">累计已分配（元）</th>
+              <th style="width:8%;" id="realizationRateColHeader" style="display:none;">实现率%</th>
+              <th style="width:16%;" id="effectiveDividendColHeader" style="display:none;">折算后红利（累计）</th>
               <th style="width:12%;" id="annuityColHeader" style="display:none;">年金金额（元）</th>
               <th style="width:8%;" id="transferColHeader" style="display:none;">转万能</th>
               <th style="width:10%;" id="otherIncomeColHeader" style="display:none;">其他收入（元）</th>
