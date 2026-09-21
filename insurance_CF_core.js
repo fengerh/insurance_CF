@@ -858,33 +858,52 @@
     }
     channelSelect.value = savedChannel;
   }
+  // 数据迁移：兼容旧版字段（policyType 映射、distributed 勾选 -> 累计已分配金额）
+  // 幂等：迁移后删除 distributed、已存在的 distributedAmount 不覆盖
+  function migratePolicies(list) {
+    if (!Array.isArray(list)) return list;
+    return list.map(p => {
+      if (p.policyType && !p.productCategory) {
+        const mapping = {
+          '增额终身寿': { category: '终身寿险', design: '普通型' },
+          '分红增额终身寿': { category: '终身寿险', design: '分红型' },
+          '终身年金': { category: '年金保险', design: '普通型' },
+          '年金两全': { category: '年金保险', design: '普通型' },
+          '养老年金': { category: '养老年金保险', design: '普通型' },
+          '重疾': { category: '重大疾病保险', design: '普通型' },
+          '定期寿险': { category: '定期寿险', design: '普通型' },
+        };
+        const mapped = mapping[p.policyType];
+        if (mapped) {
+          p.productCategory = mapped.category;
+          p.designType = mapped.design;
+        } else {
+          p.productCategory = p.policyType;
+        }
+        delete p.policyType;
+      }
+      // 分红数据迁移：旧 distributed(布尔勾选) -> distributedAmount(累计已分配金额)
+      // 打勾视为「该年已分配」，金额默认取该年累计红利
+      if (Array.isArray(p.cashValues)) {
+        p.cashValues.forEach(cv => {
+          if (cv && cv.distributed !== undefined) {
+            if (cv.distributed === true &&
+                (cv.distributedAmount === undefined || cv.distributedAmount === '' || cv.distributedAmount === null)) {
+              cv.distributedAmount = (cv.dividend === undefined || cv.dividend === null) ? '' : cv.dividend;
+            }
+            delete cv.distributed;
+          }
+        });
+      }
+      return p;
+    });
+  }
+
   function loadData() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
-        policies = JSON.parse(saved);
-        policies = policies.map(p => {
-          if (p.policyType && !p.productCategory) {
-            const mapping = {
-              '增额终身寿': { category: '终身寿险', design: '普通型' },
-              '分红增额终身寿': { category: '终身寿险', design: '分红型' },
-              '终身年金': { category: '年金保险', design: '普通型' },
-              '年金两全': { category: '年金保险', design: '普通型' },
-              '养老年金': { category: '养老年金保险', design: '普通型' },
-              '重疾': { category: '重大疾病保险', design: '普通型' },
-              '定期寿险': { category: '定期寿险', design: '普通型' },
-            };
-            const mapped = mapping[p.policyType];
-            if (mapped) {
-              p.productCategory = mapped.category;
-              p.designType = mapped.design;
-            } else {
-              p.productCategory = p.policyType;
-            }
-            delete p.policyType;
-          }
-          return p;
-        });
+        policies = migratePolicies(JSON.parse(saved));
         syncAllTransferRecords(); // 启动加载后，从年金险元数据自愈万能账户转入记录
         updateSaveHint();
       } catch (e) {
@@ -1391,6 +1410,72 @@
 
     return Math.round(accountValue);
   }
+
+  // ===== 分红红利折算（已分配 / 未分配实现率） =====
+  // 解析「累计已分配」：空/非法 => null（视为未分配）；0 视为已分配且金额为 0
+  function parseAllocatedAmount(v) {
+    if (v === '' || v === null || v === undefined) return null;
+    const n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+
+  // 解析「分红实现率(%)」：空/非法 => null（使用默认实现率）
+  function parseRealizationRate(v) {
+    if (v === '' || v === null || v === undefined) return null;
+    const n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+
+  // 保单统一默认实现率（%），未填按 100，保证改造前行为不变
+  function getDefaultRealizationRate(policy) {
+    const n = parseRealizationRate(policy && policy.dividendRealizationRate);
+    return n === null ? 100 : n;
+  }
+
+  // 计算「折算后累计红利」序列（与 sorted 对齐）
+  // 规则：
+  //   已分配年度：该年累计红利 = 累计已分配金额（全额，不乘实现率）
+  //   未分配年度：累计红利 = 上一状态 + 当年演示红利增量 × 实现率
+  // 返回 [{ year, dividend, allocated }]，allocated = 截至该年已实现（已分配）的红利部分
+  function computeEffectiveDividendSeries(sorted, policy) {
+    const out = [];
+    if (!Array.isArray(sorted) || sorted.length === 0) return out;
+    const isDividend = !policy || policy.designType === '分红型';
+    const defaultRate = getDefaultRealizationRate(policy);
+    // 「逐年覆盖」开关默认开启；显式关闭时行级实现率不参与计算
+    const overrideOn = !policy || policy.perYearRateOverride !== false;
+    let running = 0;        // 折算后累计红利
+    let allocatedBase = 0;  // 已实现（累计已分配）部分
+    let prevDemo = 0;       // 上一年累计演示红利
+    for (let i = 0; i < sorted.length; i++) {
+      const row = sorted[i] || {};
+      const demoCum = parseFloat(row.dividend) || 0;
+      if (isDividend) {
+        const alloc = parseAllocatedAmount(row.distributedAmount);
+        if (alloc !== null) {
+          running = alloc;
+          allocatedBase = alloc;
+        } else {
+          let rate = defaultRate;
+          if (overrideOn) {
+            const r = parseRealizationRate(row.realizationRate);
+            if (r !== null) rate = r;
+          }
+          running += (demoCum - prevDemo) * rate / 100;
+        }
+      } else {
+        running = demoCum;
+      }
+      out.push({
+        year: parseInt(row.year) || (i + 1),
+        dividend: running,
+        allocated: allocatedBase
+      });
+      prevDemo = demoCum;
+    }
+    return out;
+  }
+
   function calcBenefitComponentsAtDate(policy, baseDate) {
     // For universal policies with UA config, use precise daily calculation
     if (policy.designType === '万能型' && policy.universalAccount && policy.universalAccount.fundFlows && policy.universalAccount.fundFlows.length > 0) {
@@ -1428,10 +1513,11 @@
     // 现金价值（满期后为0）
     const cashVal = isMatured ? 0 : Math.round(interpolateValue(sorted, elapsedYears, 'cashValue'));
 
-    // 累计红利（满期后停在满期时值）
+    // 累计红利（折算后；满期后停在满期时值）
     let dividend = 0;
     if (policy.designType === '分红型') {
-      dividend = Math.round(interpolateValue(sorted, useElapsed, 'dividend'));
+      const dividendSeries = computeEffectiveDividendSeries(sorted, policy);
+      dividend = Math.round(interpolateValue(dividendSeries, useElapsed, 'dividend'));
     }
 
     // 累计年金
