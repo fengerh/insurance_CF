@@ -32,6 +32,11 @@
       btn.disabled = !enabled;
       btn.style.opacity = enabled ? '1' : '0.45';
     });
+    // 续期缴费记录面板按钮同步可用状态
+    document.querySelectorAll('#premiumScheduleSection .btn').forEach(btn => {
+      btn.disabled = !enabled;
+      btn.style.opacity = enabled ? '1' : '0.45';
+    });
   }
 
   function openAddModal() {
@@ -70,6 +75,7 @@
     updateAnnuityStartLabel();
     toggleCoverageInput();
     updateAutoCalc();
+    initPremiumSchedulePanel(null);
     setFormEnabled(true);
 
     const category = document.getElementById('productCategory').value;
@@ -150,6 +156,8 @@
     setTempCashValues(policy.cashValues);
     document.getElementById('cashValueImported').checked = policy.cashValueImported || false;
     updateCashValueTable();
+    // 初始化续期缴费记录（旧数据无 premiumSchedule 时自动按投保日期+缴费期限生成）
+    initPremiumSchedulePanel(policy);
 
     // 万能型：加载UA数据（try/catch保护，确保不会阻断模态框显示）
     if (policy.designType === '万能型') {
@@ -840,7 +848,7 @@
       rowClickName: 'benefitTableRowClick',
       policyList: undefined,
       defaultYearFn: (rs) => {
-        const paid = calcPaidYears(policy.startDate, policy.paymentTerm, baseDate);
+        const paid = calcPaidYearsByPolicy(policy, baseDate);
         return Math.min(paid, rs[rs.length - 1].year);
       }
     };
@@ -2090,6 +2098,15 @@
       remarks: document.getElementById('remarks').value.trim()
     };
 
+    // 续期缴费记录：仅启用时写入；未启用不带该字段 → 走旧口径，完全兼容旧数据
+    if (_psEnabled) {
+      data.premiumSchedule = getFormPremiumSchedule().map(r => ({
+        no: r.no,
+        dueDate: r.dueDate,
+        payDate: r.payDate || ''
+      }));
+    }
+
     if (id) {
       const index = policies.findIndex(p => p.id === id);
       if (index !== -1) {
@@ -2281,3 +2298,294 @@
 
   document.getElementById('startDate').addEventListener('change', updateAutoCalc);
   document.getElementById('paymentTerm').addEventListener('input', updateAutoCalc);
+
+  // 投保日期 / 缴费期限变化时，同步重算各期应缴日（保留用户改过的缴费日期）
+  document.getElementById('startDate').addEventListener('change', function () { syncPremiumScheduleWithTerm(); });
+  document.getElementById('paymentTerm').addEventListener('input', function () { syncPremiumScheduleWithTerm(); });
+  // 基准日期变化时刷新缴费计划面板的状态徽标
+  (function () {
+    const el = document.getElementById('calcDate');
+    if (!el) return;
+    el.addEventListener('change', function () { renderPremiumSchedule(); });
+    el.addEventListener('input', function () { renderPremiumSchedule(); });
+  })();
+
+  // ===== 续期缴费记录面板（草稿态，保存时才写回 policy）=====
+  let _psRows = [];
+  let _psEnabled = false;
+
+  function getFormPremiumSchedule() {
+    return _psRows;
+  }
+
+  function _psBaseDay() {
+    const b = (typeof baseDate !== 'undefined' && baseDate instanceof Date && !isNaN(baseDate.getTime()))
+      ? baseDate : new Date();
+    return new Date(b.getFullYear(), b.getMonth(), b.getDate());
+  }
+
+  function _psEnsureEnabled() {
+    if (_psEnabled) return;
+    _psEnabled = true;
+    const cb = document.getElementById('premiumScheduleEnabled');
+    if (cb) cb.checked = true;
+  }
+
+  // 某期在给定基准日下的展示状态（与 core 中 getPremiumPlan 的判定完全一致）
+  function _psRowState(row) {
+    const no = parseInt(row.no) || 0;
+    const isFirst = no === 1;
+    const due = parseYmd(row.dueDate);
+    const bTime = _psBaseDay().getTime();
+    const dueTime = due ? due.getTime() : null;
+    const defaultPay = getDefaultPayDateOfInstallment(due, no);
+
+    // 第 1 期：缴费日期固定等于投保日，达到投保日即视为已缴
+    if (isFirst) {
+      return (dueTime !== null && bTime >= dueTime)
+        ? { isPaid: true, isFirst: true, isDefault: true, text: '首期(投保日)', cls: 'ps-badge-paid' }
+        : { isPaid: false, isFirst: true, isDefault: true, text: '未生效', cls: 'ps-badge-future' };
+    }
+
+    const pay = parseYmd(row.payDate);
+    const payTime = pay ? pay.getTime() : null;
+    const isDefault = !!row.payDate && row.payDate === defaultPay;
+    const isPaid = payTime !== null && payTime <= bTime;
+
+    if (!row.payDate) {
+      return (dueTime !== null && bTime < dueTime)
+        ? { isPaid: false, isFirst: false, isDefault, text: '未到期', cls: 'ps-badge-future' }
+        : { isPaid: false, isFirst: false, isDefault, text: '欠缴', cls: 'ps-badge-unpaid' };
+    }
+    if (isPaid) {
+      return isDefault
+        ? { isPaid: true, isFirst: false, isDefault, text: '已缴(预设)', cls: 'ps-badge-preset' }
+        : { isPaid: true, isFirst: false, isDefault, text: '已缴', cls: 'ps-badge-paid' };
+    }
+    if (dueTime !== null && bTime < dueTime) return { isPaid: false, isFirst: false, isDefault, text: '未到期', cls: 'ps-badge-future' };
+    if (dueTime !== null && bTime < dueTime + PREMIUM_GRACE_DAYS * PREMIUM_DAY_MS) {
+      return { isPaid: false, isFirst: false, isDefault, text: '宽限期内', cls: 'ps-badge-ingrace' };
+    }
+    return { isPaid: false, isFirst: false, isDefault, text: '逾期未缴', cls: 'ps-badge-late' };
+  }
+
+  // 打开弹窗时初始化：旧数据没有 premiumSchedule → 按投保日期+缴费期限生成默认值预览
+  function initPremiumSchedulePanel(policy) {
+    _psEnabled = !!(policy && Array.isArray(policy.premiumSchedule) && policy.premiumSchedule.length > 0);
+    const cb = document.getElementById('premiumScheduleEnabled');
+    if (cb) cb.checked = _psEnabled;
+
+    _psRows = buildPremiumScheduleFromTerm(
+      document.getElementById('startDate').value,
+      document.getElementById('paymentTerm').value
+    );
+    if (_psEnabled) {
+      policy.premiumSchedule.forEach(function (src) {
+        const no = parseInt(src.no) || 0;
+        const row = _psRows.find(function (r) { return r.no === no; });
+        if (!row) return;
+        // 首期缴费日期固定为投保日，忽略存储值（自动纠正历史上写成"投保日+60"的旧数据）
+        row.payDate = (no === 1) ? row.dueDate : (src.payDate || '');
+      });
+    }
+    renderPremiumSchedule();
+  }
+
+  // 投保日期/缴费期限变化后重建期次，保留用户改过的缴费日期
+  function syncPremiumScheduleWithTerm() {
+    const startVal = document.getElementById('startDate').value;
+    const termVal = document.getElementById('paymentTerm').value;
+    const next = buildPremiumScheduleFromTerm(startVal, termVal);
+    next.forEach(function (nr) {
+      // 首期缴费日期恒等于投保日，永远跟随重算
+      if (nr.no === 1) { nr.payDate = nr.dueDate; return; }
+      const old = _psRows.find(function (r) { return r.no === nr.no; });
+      if (!old) return;
+      const oldDue = parseYmd(old.dueDate);
+      const oldDefault = getDefaultPayDateOfInstallment(oldDue, old.no);
+      // 与默认值不同（用户改过，或已清空）→ 保留；仍等于默认值 → 跟随重算
+      if (old.payDate !== oldDefault) nr.payDate = old.payDate;
+    });
+    _psRows = next;
+    renderPremiumSchedule();
+  }
+
+  function renderPremiumSchedule() {
+    const body = document.getElementById('premiumScheduleBody');
+    if (!body) return;
+    const table = document.getElementById('premiumScheduleTable');
+    const wrap = table ? table.closest('.ps-table-wrap') : null;
+    const emptyEl = document.getElementById('premiumScheduleEmpty');
+
+    if (_psRows.length === 0) {
+      body.innerHTML = '';
+      if (table) table.style.display = 'none';
+      if (wrap) wrap.style.display = 'none';
+      if (emptyEl) emptyEl.style.display = 'block';
+      updatePremiumScheduleSummary();
+      return;
+    }
+    if (table) table.style.display = '';
+    if (wrap) wrap.style.display = '';
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    const scrollTop = wrap ? wrap.scrollTop : 0;
+    const dis = _psEnabled ? '' : 'disabled';
+    const rowCls = _psEnabled ? '' : ' class="ps-row-disabled"';
+
+    body.innerHTML = _psRows.map(function (r) {
+      const isFirst = (parseInt(r.no) || 0) === 1;
+      if (isFirst) r.payDate = r.dueDate;   // 首期缴费日期固定等于投保日
+      const st = _psRowState(r);
+
+      const dateCell = isFirst
+        ? '<td><input type="date" value="' + (r.dueDate || '') + '" disabled></td>'
+        : '<td><input type="date" value="' + (r.payDate || '') + '" min="1900-01-01" max="2100-12-31" ' + dis
+          + ' onchange="updateSchedulePayDate(' + r.no + ', this.value)"></td>';
+
+      const opCell = isFirst
+        ? '<td><span class="ps-fixed" title="首期保费与投保同日缴纳，日期固定不可修改">固定</span></td>'
+        : '<td>'
+          + '<button type="button" class="del-row-btn" title="恢复为宽限期末" ' + dis
+          + ' onclick="resetScheduleRowToDefault(' + r.no + ')">&#8635;</button>'
+          + '<button type="button" class="del-row-btn" title="清空（该期欠缴）" ' + dis
+          + ' onclick="clearScheduleRowPayDate(' + r.no + ')">&times;</button>'
+          + '</td>';
+
+      return '<tr' + (isFirst ? ' class="ps-row-fixed"' : rowCls) + '>'
+        + '<td>' + r.no + '</td>'
+        + '<td style="color:#6b7280;">' + (r.dueDate || '-') + '</td>'
+        + dateCell
+        + '<td><span class="ps-badge ' + st.cls + '" title="' + st.text + '">' + st.text + '</span></td>'
+        + opCell + '</tr>';
+    }).join('');
+
+    if (wrap) wrap.scrollTop = scrollTop;
+    updatePremiumScheduleSummary();
+  }
+
+  function updatePremiumScheduleSummary() {
+    const hintEl = document.getElementById('psBaseDateHint');
+    if (hintEl) hintEl.textContent = '基准日期：' + fmtYmd(_psBaseDay());
+
+    const el = document.getElementById('psSummary');
+    if (!el) return;
+    if (_psRows.length === 0) {
+      el.textContent = '未生成';
+      el.style.color = '#9ca3af';
+      return;
+    }
+    const annualEl = document.getElementById('annualPremium');
+    const amount = annualEl ? (parseFloat(annualEl.value) || 0) : 0;
+    let paid = 0, overdue = 0, pending = 0;
+    _psRows.forEach(function (r) {
+      const st = _psRowState(r);
+      if (st.isPaid) paid++;
+      else if (st.text === '欠缴' || st.text === '逾期未缴') overdue += amount;
+      else if (st.text === '宽限期内') pending += amount;
+    });
+    const parts = ['已缴 ' + paid + '/' + _psRows.length + ' 期', '累计已交 ¥' + formatMoney(paid * amount)];
+    if (pending > 0) parts.push('待交 ¥' + formatMoney(pending));
+    if (overdue > 0) parts.push('逾期 ¥' + formatMoney(overdue));
+    if (!_psEnabled) parts.push('未启用精确计算');
+    el.textContent = parts.join(' · ');
+    el.style.color = overdue > 0 ? '#dc2626' : (paid > 0 ? '#059669' : '#9ca3af');
+
+    // 同步「已交年限 / 缴费状态」的自动测算显示（启用缴费计划时以本表为准）
+    if (_psEnabled) {
+      const paidEl = document.getElementById('paidYearsDisplay');
+      const statusEl = document.getElementById('paymentStatusDisplay');
+      if (paidEl) paidEl.value = paid + ' 年';
+      if (statusEl) statusEl.value = (paid >= _psRows.length) ? '缴清' : '交费中';
+    }
+  }
+
+  function updateSchedulePayDate(no, value) {
+    if ((parseInt(no) || 0) === 1) return;   // 首期缴费日期固定为投保日，不可修改
+    const row = _psRows.find(function (r) { return r.no === no; });
+    if (!row) return;
+    _psEnsureEnabled();
+    row.payDate = value || '';
+    renderPremiumSchedule();
+  }
+
+  function resetScheduleRowToDefault(no) {
+    if ((parseInt(no) || 0) === 1) return;
+    const row = _psRows.find(function (r) { return r.no === no; });
+    if (!row) return;
+    _psEnsureEnabled();
+    row.payDate = getDefaultPayDateOfInstallment(parseYmd(row.dueDate), row.no);
+    renderPremiumSchedule();
+  }
+
+  function clearScheduleRowPayDate(no) {
+    if ((parseInt(no) || 0) === 1) return;   // 首期不可置为欠缴
+    const row = _psRows.find(function (r) { return r.no === no; });
+    if (!row) return;
+    _psEnsureEnabled();
+    row.payDate = '';
+    renderPremiumSchedule();
+  }
+
+  function resetAllScheduleToDefault() {
+    _psEnsureEnabled();
+    _psRows.forEach(function (r) {
+      r.payDate = getDefaultPayDateOfInstallment(parseYmd(r.dueDate), r.no);
+    });
+    renderPremiumSchedule();
+  }
+
+  // 过去各期（应缴日已过）按应缴日当天填充，便于老保单补录
+  function fillPastInstallmentsByDue() {
+    _psEnsureEnabled();
+    const bTime = _psBaseDay().getTime();
+    _psRows.forEach(function (r) {
+      if ((parseInt(r.no) || 0) === 1) return;   // 首期本就等于应缴日
+      const due = parseYmd(r.dueDate);
+      if (!due) return;
+      if (due.getTime() <= bTime) r.payDate = r.dueDate;
+    });
+    renderPremiumSchedule();
+  }
+
+  // 把最近一个"已过应缴日但还没缴"的期次标记为今天已缴
+  function markNextDueAsToday() {
+    _psEnsureEnabled();
+    const base = _psBaseDay();
+    const candidates = _psRows.filter(function (r) { return (parseInt(r.no) || 0) !== 1; });
+    let target = null;
+    candidates.forEach(function (r) {
+      if (target) return;
+      const due = parseYmd(r.dueDate);
+      if (!due || due.getTime() > base.getTime()) return;
+      if (!_psRowState(r).isPaid) target = r;
+    });
+    if (!target) {
+      target = candidates.find(function (r) { return !_psRowState(r).isPaid; }) || null;
+    }
+    if (!target) { alert('所有期次均已标记为已缴'); return; }
+    target.payDate = fmtYmd(base);
+    renderPremiumSchedule();
+  }
+
+  function clearAllSchedulePayDates() {
+    if (!confirm('确定清空首期以外各期的缴费日期？清空后这些期次都将视为欠缴，现金价值会被冻结（首期固定为投保日，不受影响）。')) return;
+    _psEnsureEnabled();
+    _psRows.forEach(function (r) {
+      // 首期缴费日期固定为投保日，不参与清空
+      r.payDate = ((parseInt(r.no) || 0) === 1) ? r.dueDate : '';
+    });
+    renderPremiumSchedule();
+  }
+
+  function onPremiumScheduleEnabledChange() {
+    const cb = document.getElementById('premiumScheduleEnabled');
+    _psEnabled = cb ? cb.checked : false;
+    if (_psEnabled && _psRows.length === 0) {
+      _psRows = buildPremiumScheduleFromTerm(
+        document.getElementById('startDate').value,
+        document.getElementById('paymentTerm').value
+      );
+    }
+    renderPremiumSchedule();
+  }

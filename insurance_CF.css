@@ -1259,6 +1259,89 @@
   .wf-col--empty .wf-col-meta {
     color: #9ca3af;
   }
+  /* ===== 续期缴费记录面板 ===== */
+  .ps-hint {
+    font-size: 12px;
+    color: #4b5563;
+    line-height: 1.7;
+    background: #eef2ff;
+    border: 1px solid #e0e7ff;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+  }
+  .ps-hint b { color: #4338ca; }
+  .ps-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .ps-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #374151;
+    margin: 0;
+    white-space: nowrap;
+  }
+  .ps-basedate {
+    font-size: 12px;
+    color: #9ca3af;
+  }
+  .ps-table-wrap {
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+  }
+  .ps-table-wrap thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  .ps-empty {
+    display: none;
+    font-size: 12px;
+    color: #9ca3af;
+    text-align: center;
+    padding: 18px 10px;
+    background: #f9fafb;
+    border: 1px dashed #e5e7eb;
+    border-radius: 6px;
+  }
+  .ps-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .ps-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .ps-badge-paid { background: #d1fae5; color: #065f46; }
+  .ps-badge-preset { background: #e0e7ff; color: #3730a3; }
+  .ps-badge-future { background: #f3f4f6; color: #6b7280; }
+  .ps-badge-ingrace { background: #dbeafe; color: #1d4ed8; }
+  .ps-badge-late { background: #fef3c7; color: #92400e; }
+  .ps-badge-unpaid { background: #fee2e2; color: #b91c1c; }
+  .ps-row-disabled input { background: #f9fafb; color: #6b7280; }
+  .ps-row-fixed input { background: #f3f4f6; color: #6b7280; }
+  .ps-fixed {
+    display: inline-block;
+    font-size: 11px;
+    color: #9ca3af;
+    letter-spacing: 1px;
+  }
+  .tag-status-unpaid { background: #fee2e2; color: #b91c1c; font-weight: 700; }
   @media (max-width: 768px) {
     .wf-grid-3 { grid-template-columns: 1fr; }
   }

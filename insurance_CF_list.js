@@ -103,17 +103,17 @@
     const sorted = [...filtered].sort((a, b) => {
       let valA, valB;
       if (sortField === 'paymentStatus') {
-        valA = calcPaymentStatus(a.startDate, a.paymentTerm, baseDate) || '';
-        valB = calcPaymentStatus(b.startDate, b.paymentTerm, baseDate) || '';
+        valA = calcPaymentStatusByPolicy(a, baseDate) || '';
+        valB = calcPaymentStatusByPolicy(b, baseDate) || '';
       } else if (sortField === 'paidYears') {
-        valA = calcPaidYears(a.startDate, a.paymentTerm, baseDate);
-        valB = calcPaidYears(b.startDate, b.paymentTerm, baseDate);
+        valA = calcPaidYearsByPolicy(a, baseDate);
+        valB = calcPaidYearsByPolicy(b, baseDate);
       } else if (sortField === 'coverage') {
         valA = formatCoverage(a);
         valB = formatCoverage(b);
       } else if (sortField === 'cumulativePremium') {
-        valA = (parseFloat(a.annualPremium) || 0) * calcPaidYears(a.startDate, a.paymentTerm);
-        valB = (parseFloat(b.annualPremium) || 0) * calcPaidYears(b.startDate, b.paymentTerm);
+        valA = (parseFloat(a.annualPremium) || 0) * calcPaidYearsByPolicy(a, baseDate);
+        valB = (parseFloat(b.annualPremium) || 0) * calcPaidYearsByPolicy(b, baseDate);
       } else {
         valA = a[sortField];
         valB = b[sortField];
@@ -138,7 +138,7 @@
     updateSortIndicators();
 
     tbody.innerHTML = sorted.map((p, index) => {
-      const paidYears = calcPaidYears(p.startDate, p.paymentTerm, baseDate);
+      const paidYears = calcPaidYearsByPolicy(p, baseDate);
       const checked = comboMode && comboSelectedIds.includes(p.id) ? 'checked' : '';
       let disabled = '';
       if (comboMode && comboSelectedIds.length >= COMBO_MAX && !comboSelectedIds.includes(p.id)) {
