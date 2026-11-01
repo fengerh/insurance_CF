@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>保单管理工具 v20260921.1440</title>
+<title>保单管理工具 v20261031.2350</title>
 <link rel="stylesheet" href="insurance_CF.css">
 
 </head>
@@ -253,6 +253,50 @@
           <div class="form-group">
             <label>缴费状态（自动测算）</label>
             <input type="text" id="paymentStatusDisplay" disabled style="background:#f3f4f6;color:#6b7280;">
+          </div>
+        </div>
+
+        <!-- 续期缴费记录（逐期缴费日期） -->
+        <div class="form-row full" id="premiumScheduleRow">
+          <div class="ua-section collapsed" id="premiumScheduleSection" style="width:100%;">
+            <div class="ua-section-title" onclick="toggleUASection(this)">
+              💳 续期缴费记录
+              <span class="ua-count" id="psSummary">未生成</span>
+            </div>
+            <div class="ua-section-body">
+              <div class="ps-hint">
+                <b>第 1 期</b>保费与投保同日缴纳，缴费日期固定为投保日、不可修改；<b>第 2 期起</b>默认按宽限期最后一天（应缴日 + 60 天）预填，与实际缴费日不同时可逐期修改，清空表示该期欠缴。<br>
+                勾选「按本表精确计算」后，现金价值按该期缴费日期起线性计价，该期未缴则冻结在上一保单年度末；不勾选则沿用系统原规则（应缴日 + 60 天视为已缴），两者在默认日期下结果一致。
+              </div>
+              <div class="ps-toolbar">
+                <label class="ps-switch">
+                  <input type="checkbox" id="premiumScheduleEnabled" onchange="onPremiumScheduleEnabledChange()">
+                  按本表精确计算
+                </label>
+                <span class="ps-basedate" id="psBaseDateHint"></span>
+              </div>
+              <div class="ps-table-wrap">
+                <table class="ua-table" id="premiumScheduleTable">
+                  <thead>
+                    <tr>
+                      <th style="width:14%;">期次</th>
+                      <th style="width:26%;">应缴日</th>
+                      <th style="width:30%;">缴费日期</th>
+                      <th style="width:16%;">状态</th>
+                      <th style="width:14%;">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="premiumScheduleBody"></tbody>
+                </table>
+              </div>
+              <div class="ps-empty" id="premiumScheduleEmpty">请先填写「投保日期」与「缴费期限（年）」，系统会自动生成各期缴费日期</div>
+              <div class="ps-actions">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="resetAllScheduleToDefault()">全部恢复默认（宽限期末）</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="fillPastInstallmentsByDue()">过去各期按应缴日填充</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="markNextDueAsToday()">最近一期标记为已缴</button>
+                <button type="button" class="btn btn-danger btn-sm" onclick="clearAllSchedulePayDates()">全部清空（欠缴）</button>
+              </div>
+            </div>
           </div>
         </div>
         

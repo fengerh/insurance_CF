@@ -413,6 +413,24 @@
 
       // 缴费事件（缴费日 + 宽限期）
       if (includePayment && paymentTerm > 0) {
+        if (hasPremiumSchedule(p)) {
+          // 启用逐期缴费记录：直接按每期最终确定的缴费日期出事件（含是否已缴标记）
+          const plan = getPremiumPlan(p, baseDate);
+          (plan ? plan.rows : []).forEach(r => {
+            const payDay = parseYmd(r.payDate) || parseYmd(r.dueDate);
+            if (!payDay) return;
+            if (payDay < startDate || payDay > endDate) return;
+            const tag = r.isPaid ? (r.isDefault ? '预设' : '已缴')
+              : (r.status === 'unpaid' ? '欠缴' : '待缴');
+            events.push({
+              date: new Date(payDay),
+              type: '缴费日',
+              label: `📌${company} ${policyName} 缴费 ${r.no}/${paymentTerm}期(${tag})`,
+              amount: annualPremium,
+              policyId
+            });
+          });
+        } else {
         for (let i = 0; i < paymentTerm; i++) {
           const dueDate = new Date(start);
           dueDate.setFullYear(start.getFullYear() + i);
@@ -437,6 +455,7 @@
               policyId
             });
           }
+        }
         }
       }
 
@@ -957,12 +976,251 @@
     return paid;
   }
 
+  // ===== 续期缴费计划（policy.premiumSchedule，可选字段）=====
+  // 每期：{ no, dueDate, payDate }
+  //   dueDate  应缴日 = 投保日 + (no-1) 年，系统计算，只读
+  //   payDate  缴费日期，默认 = 应缴日 + 60 天（宽限期最后一天），可逐期修改；空字符串 = 该期欠缴
+  // 唯一判定：payDate 非空 且 payDate <= 基准日 → 该期已缴（全程只用基准日，不引入 today）
+  const PREMIUM_GRACE_DAYS = 60;
+  const PREMIUM_DAY_MS = 24 * 3600 * 1000;
+  const _premiumPlanCache = new WeakMap();
+
+  function fmtYmd(d) {
+    if (!d || isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  function parseYmd(s) {
+    if (!s) return null;
+    const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(s));
+    if (!m) return null;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // 第 no 期应缴日（no 从 1 开始，第 1 期 = 投保日）
+  function getInstallmentDueDate(startDateStr, no) {
+    const raw = parseYmd(startDateStr) || new Date(startDateStr);
+    if (isNaN(raw.getTime())) return null;
+    // 归一到当地零点，避免 'YYYY-MM-DD' 被按 UTC 解析造成的时区偏移
+    const start = new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
+    const d = new Date(start);
+    d.setFullYear(start.getFullYear() + (no - 1));
+    d.setMonth(start.getMonth(), start.getDate());
+    return d;
+  }
+
+  // 宽限期最后一天 = 应缴日 + 60 天
+  function getGraceEndDate(dueDate) {
+    if (!dueDate || isNaN(dueDate.getTime())) return null;
+    const d = new Date(dueDate);
+    d.setDate(d.getDate() + PREMIUM_GRACE_DAYS);
+    return d;
+  }
+
+  /**
+   * 某期的默认缴费日 —— 唯一真相
+   * 第 1 期：保费与投保同日缴纳 → 等于应缴日（= 投保日）
+   * 第 2 期起：默认缴在宽限期最后一天（应缴日 + 60 天）
+   */
+  function getDefaultPayDateOfInstallment(dueDate, no) {
+    if (!dueDate || isNaN(dueDate.getTime())) return '';
+    return (parseInt(no, 10) || 0) === 1 ? fmtYmd(dueDate) : fmtYmd(getGraceEndDate(dueDate));
+  }
+
+  // 按投保日期 + 缴费期限生成整张计划表（首期=投保日，其余默认缴在宽限期最后一天）
+  function buildPremiumScheduleFromTerm(startDateStr, paymentTerm) {
+    const term = parseInt(paymentTerm) || 0;
+    if (term <= 0 || !startDateStr) return [];
+    const start = new Date(startDateStr);
+    if (isNaN(start.getTime())) return [];
+    const rows = [];
+    for (let i = 1; i <= term; i++) {
+      const due = getInstallmentDueDate(startDateStr, i);
+      if (!due) continue;
+      rows.push({ no: i, dueDate: fmtYmd(due), payDate: getDefaultPayDateOfInstallment(due, i) });
+    }
+    return rows;
+  }
+
+  // 是否启用了逐期缴费记录（字段不存在/为空 → 走老口径，完全兼容旧数据）
+  function hasPremiumSchedule(policy) {
+    return !!(policy && Array.isArray(policy.premiumSchedule) && policy.premiumSchedule.length > 0);
+  }
+
+  // 读取保单的缴费计划；未启用时按老规则即时生成（不写回数据）
+  function getPremiumSchedule(policy) {
+    if (!policy) return [];
+    if (hasPremiumSchedule(policy)) return policy.premiumSchedule;
+    return buildPremiumScheduleFromTerm(policy.startDate, policy.paymentTerm);
+  }
+
+  /**
+   * 缴费计划聚合 —— 所有计价与统计的唯一数据源
+   * rows[].status:
+   *   paid    已缴（日期被用户改过）
+   *   preset  已缴（仍是预设的宽限期末日期）
+   *   future  未到期（应缴日还没到）
+   *   inGrace 宽限期内未缴（现价冻结）
+   *   lateDue 已过宽限期仍未缴（现价冻结，计入逾期）
+   *   unpaid  缴费日期被清空（欠缴，现价冻结，计入逾期）
+   *   first   第 1 期（缴费日期固定等于投保日，达到投保日即视为已缴）
+   */
+  function getPremiumPlan(policy, baseDateArg) {
+    if (!policy) return null;
+    const base = (baseDateArg instanceof Date && !isNaN(baseDateArg.getTime())) ? baseDateArg : new Date();
+    const baseKey = fmtYmd(base);
+    const cached = _premiumPlanCache.get(policy);
+    if (cached && cached.baseKey === baseKey) return cached.plan;
+
+    const mode = hasPremiumSchedule(policy) ? 'schedule' : 'legacy';
+    const schedule = getPremiumSchedule(policy);
+    const amount = parseFloat(policy.annualPremium) || 0;
+    const bTime = new Date(base.getFullYear(), base.getMonth(), base.getDate()).getTime();
+
+    let paidCount = 0, cumulativePaid = 0, unpaidAmount = 0, overdueAmount = 0, remainingAmount = 0;
+    let nextUnpaidDue = null;
+
+    const rows = schedule.map(src => {
+      const no = parseInt(src.no) || 0;
+      const isFirst = no === 1;
+      const due = parseYmd(src.dueDate);
+      const dueTime = due ? due.getTime() : null;
+      // 第 1 期保费与投保同日缴纳：生效缴费日期恒等于应缴日，与存储值无关
+      // （已存数据里若写成"投保日+60"或被清空，这里自动纠正，不需要数据迁移）
+      const payStr = isFirst ? (src.dueDate || '') : (src.payDate || '');
+      const pay = parseYmd(payStr);
+      const payTime = pay ? pay.getTime() : null;
+      const defaultPay = getDefaultPayDateOfInstallment(due, no);
+      const isDefault = !!payStr && payStr === defaultPay;
+      const isPaid = payTime !== null && payTime <= bTime;
+
+      let status;
+      if (isFirst) {
+        status = isPaid ? 'first' : 'future';
+      } else if (!payStr) {
+        status = (dueTime !== null && bTime < dueTime) ? 'future' : 'unpaid';
+      } else if (isPaid) {
+        status = isDefault ? 'preset' : 'paid';
+      } else if (dueTime !== null && bTime < dueTime) {
+        status = 'future';
+      } else if (dueTime !== null && bTime < dueTime + PREMIUM_GRACE_DAYS * PREMIUM_DAY_MS) {
+        status = 'inGrace';
+      } else {
+        status = 'lateDue';
+      }
+
+      if (isPaid) { paidCount++; cumulativePaid += amount; }
+      else if (status === 'unpaid' || status === 'lateDue') overdueAmount += amount;
+      else if (status === 'inGrace') unpaidAmount += amount;
+      else if (status === 'future') remainingAmount += amount;
+
+      if (!nextUnpaidDue && !isPaid && dueTime !== null && bTime < dueTime) nextUnpaidDue = src.dueDate;
+
+      return {
+        no,
+        dueDate: src.dueDate || '',
+        payDate: payStr,
+        amount,
+        isPaid,
+        isDefault,
+        isFirst,
+        status
+      };
+    });
+
+    const term = parseInt(policy.paymentTerm) || rows.length;
+    const plan = {
+      mode,
+      rows,
+      total: rows.length,
+      term,
+      paidCount,
+      cumulativePaid,
+      unpaidAmount,
+      overdueAmount,
+      remainingAmount,
+      isSettled: term > 0 && paidCount >= term,
+      nextDueDate: nextUnpaidDue
+    };
+    _premiumPlanCache.set(policy, { baseKey, plan });
+    return plan;
+  }
+
+  // 已缴期数（按保单对象取，启用缴费计划时按计划算，否则沿用老口径）
+  function calcPaidYearsByPolicy(policy, baseDateArg) {
+    if (!policy) return 0;
+    if (!hasPremiumSchedule(policy)) {
+      return calcPaidYears(policy.startDate, policy.paymentTerm, baseDateArg);
+    }
+    const plan = getPremiumPlan(policy, baseDateArg);
+    return plan ? plan.paidCount : 0;
+  }
+
+  /**
+   * 现金价值取值（仅 schedule 模式使用）
+   * 当前保单年度那一期未缴 → 冻结在上一保单年度末；
+   * 已缴 → 以 max(缴费日期, 本年度起点) 为锚点，线性走到本年度末。
+   */
+  function interpolateCashValueByPlan(policy, sorted, baseDateArg) {
+    if (!sorted || sorted.length === 0) return 0;
+    const rawStart = parseYmd(policy.startDate) || new Date(policy.startDate);
+    if (isNaN(rawStart.getTime())) return parseFloat(sorted[0].cashValue) || 0;
+    const start = new Date(rawStart.getFullYear(), rawStart.getMonth(), rawStart.getDate());
+    const base = (baseDateArg instanceof Date && !isNaN(baseDateArg.getTime())) ? baseDateArg : new Date();
+    const baseDay = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+    const elapsedYears = (baseDay - start) / (365.25 * 24 * 3600 * 1000);
+    const firstYear = parseInt(sorted[0].year) || 0;
+    if (elapsedYears <= firstYear) return parseFloat(sorted[0].cashValue) || 0;
+
+    const lastYear = parseInt(sorted[sorted.length - 1].year) || 0;
+    let k = Math.ceil(elapsedYears);
+    if (k < 1) k = 1;
+    if (k > lastYear) k = lastYear;
+    if (k <= firstYear) return parseFloat(sorted[0].cashValue) || 0;
+
+    const vPrev = interpolateValue(sorted, k - 1, 'cashValue');
+    const vCur = interpolateValue(sorted, k, 'cashValue');
+
+    const plan = getPremiumPlan(policy, base);
+    const row = (plan && plan.rows) ? plan.rows[k - 1] : null;
+    if (!row || !row.isPaid) return vPrev;   // 该期未缴 → 冻结在上一保单年度末
+
+    const payDate = parseYmd(row.payDate);
+    if (!payDate) return vPrev;
+    const yearStart = getInstallmentDueDate(policy.startDate, k);      // 第 k 年度起点
+    const yearEnd = getInstallmentDueDate(policy.startDate, k + 1);    // 第 k 年度末
+    if (!yearStart || !yearEnd) return vCur;
+
+    const anchor = Math.max(payDate.getTime(), yearStart.getTime());
+    const denom = yearEnd.getTime() - anchor;
+    if (denom <= 0) return vCur;
+    let ratio = (baseDay.getTime() - anchor) / denom;
+    if (ratio < 0) ratio = 0;
+    if (ratio > 1) ratio = 1;
+    return vPrev + (vCur - vPrev) * ratio;
+  }
+
   function calcPaymentStatus(startDate, paymentTerm, baseDate) {
     if (!startDate || !paymentTerm) return '待确认';
     const paid = calcPaidYears(startDate, paymentTerm, baseDate);
     const term = parseInt(paymentTerm);
     if (isNaN(term)) return '待确认';
     return paid >= term ? '缴清' : '交费中';
+  }
+
+  // 缴费状态（按保单对象取；启用逐期缴费记录时以计划为准）
+  function calcPaymentStatusByPolicy(policy, baseDateArg) {
+    if (!policy) return '待确认';
+    if (!hasPremiumSchedule(policy)) {
+      return calcPaymentStatus(policy.startDate, policy.paymentTerm, baseDateArg);
+    }
+    const plan = getPremiumPlan(policy, baseDateArg);
+    if (!plan || !plan.term) return '待确认';
+    return plan.isSettled ? '缴清' : '交费中';
   }
 
   function calcPolicyStatus(policy, baseDate) {
@@ -982,7 +1240,7 @@
     }
     // 否则正常聚合多重状态
     const statuses = [];
-    const payStatus = calcPaymentStatus(policy.startDate, policy.paymentTerm, baseDate);
+    const payStatus = calcPaymentStatusByPolicy(policy, baseDate);
     if (payStatus !== '待确认') statuses.push(payStatus);
     const isAnnuity = policy.productCategory === '年金保险' || policy.productCategory === '养老年金保险';
     if (isAnnuity && policy.annuityStartDate) {
@@ -1013,6 +1271,15 @@
   }
   function getPremiumDueDeadline(policy, baseDate) {
     if (!policy.startDate || !policy.paymentTerm) return null;
+    // 启用了逐期缴费记录：以计划中第一个"未缴"的期次为准
+    if (hasPremiumSchedule(policy)) {
+      const plan = getPremiumPlan(policy, baseDate);
+      if (!plan) return null;
+      const row = plan.rows.find(r => !r.isPaid && (r.status === 'inGrace' || r.status === 'lateDue' || r.status === 'unpaid'));
+      if (!row) return null;
+      const due = parseYmd(row.dueDate);
+      return due ? getGraceEndDate(due) : null;
+    }
     const start = new Date(policy.startDate);
     if (isNaN(start.getTime())) return null;
     const term = parseInt(policy.paymentTerm);
@@ -1029,13 +1296,16 @@
   function renderStatusTags(policy, baseDate) {
     const statuses = calcPolicyStatus(policy, baseDate);
     const shortMap = { '交费中': '交', '缴清': '清', '年金领取': '金', '满期': '满', '退保': '退' };
-    return statuses.map(s => {
+    // 续期缴费记录：存在逾期期次时用「欠」表达，避免与红色「交」重复提示
+    const plan = hasPremiumSchedule(policy) ? getPremiumPlan(policy, baseDate) : null;
+    const hasOverdue = !!(plan && plan.overdueAmount > 0);
+    const html = statuses.map(s => {
       // "费x" 特殊处理：红色标签
       if (s.startsWith('费')) {
         return `<span class="tag" style="background:#fef3c7;color:#92400e;margin:0 1px;" title="退保手续费${s.replace('费','')}%">${s}</span>`;
       }
       // 交费中且在应缴窗口(到期日~到期日+60天宽限期) → 红体粗体提示交保费
-      if (s === '交费中') {
+      if (s === '交费中' && !hasOverdue) {
         const deadline = getPremiumDueDeadline(policy, baseDate);
         if (deadline) {
           const dl = `${deadline.getFullYear()}-${String(deadline.getMonth() + 1).padStart(2, '0')}-${String(deadline.getDate()).padStart(2, '0')}`;
@@ -1044,6 +1314,11 @@
       }
       return `<span class="tag tag-status-${s}" style="margin:0 1px;" title="${s}">${shortMap[s] || s}</span>`;
     }).join('');
+    if (hasOverdue) {
+      const missed = plan.rows.filter(r => !r.isPaid && (r.status === 'unpaid' || r.status === 'lateDue')).length;
+      return html + `<span class="tag tag-status-unpaid" style="margin:0 1px;" title="欠缴 ${missed} 期，逾期保费 ${formatMoney(plan.overdueAmount)}">欠</span>`;
+    }
+    return html;
   }
   function renderStats(filteredList) {
     const baseData = filteredList !== undefined ? filteredList : policies;
@@ -1082,9 +1357,20 @@
     });
 
     const totalPaidPremium = activeData.reduce((sum, p) => {
-      const paidYears = calcPaidYears(p.startDate, p.paymentTerm, today);
+      const paidYears = calcPaidYearsByPolicy(p, today);
       return sum + (parseFloat(p.annualPremium) || 0) * paidYears;
     }, 0) + totalFundFlow;
+
+    // 逾期未缴（仅启用逐期缴费记录的保单参与统计）
+    let overdueCount = 0, totalOverdueAmount = 0;
+    activeData.forEach(p => {
+      if (!hasPremiumSchedule(p)) return;
+      const plan = getPremiumPlan(p, today);
+      if (plan && plan.overdueAmount > 0) {
+        overdueCount++;
+        totalOverdueAmount += plan.overdueAmount;
+      }
+    });
 
     const currentYear = today.getFullYear();
     let paidCount = 0, paidAmount = 0;
@@ -1110,7 +1396,17 @@
       const deadline = new Date(anniversary);
       deadline.setDate(deadline.getDate() + 60);
 
-      if (today >= deadline) {
+      // 启用逐期缴费记录时，按计划中"本年度对应那一期"是否已缴判断；否则沿用宽限期末判断
+      let currentPaid;
+      if (hasPremiumSchedule(p)) {
+        const plan = getPremiumPlan(p, today);
+        const row = plan ? plan.rows[currentYear - startYear] : null;
+        currentPaid = !!(row && row.isPaid);
+      } else {
+        currentPaid = today >= deadline;
+      }
+
+      if (currentPaid) {
         paidCount++;
         paidAmount += annual;
         const remainingYears = (startYear + term) - (currentYear + 1);
@@ -1216,7 +1512,10 @@
           <div class="stat-label">✅ 当年累计已交</div>
           <div class="stat-value" style="color:#059669;">${formatMoneyDisplay(paidAmount)}</div>
         </div>
-        <div class="stat-card"></div>
+        <div class="stat-card" style="border-left: 3px solid ${totalOverdueAmount > 0 ? '#dc2626' : '#e5e7eb'};">
+          <div class="stat-label">⚠️ 逾期未缴保费</div>
+          <div class="stat-value" style="color:${totalOverdueAmount > 0 ? '#dc2626' : '#9ca3af'};">${formatMoneyDisplay(totalOverdueAmount)}<span style="font-size:12px;color:#9ca3af;font-weight:400;"> / ${overdueCount} 份</span></div>
+        </div>
       </div>
     `;
   }
@@ -1511,7 +1810,12 @@
     const useElapsed = isMatured ? maturityElapsedYears : elapsedYears;
 
     // 现金价值（满期后为0）
-    const cashVal = isMatured ? 0 : Math.round(interpolateValue(sorted, elapsedYears, 'cashValue'));
+    // 启用逐期缴费记录：按"该保单年度那一期是否已缴"锚点计价；未启用：沿用原有线性插值
+    const cashVal = isMatured ? 0 : Math.round(
+      hasPremiumSchedule(policy)
+        ? interpolateCashValueByPlan(policy, sorted, baseDate)
+        : interpolateValue(sorted, elapsedYears, 'cashValue')
+    );
 
     // 累计红利（折算后；满期后停在满期时值）
     let dividend = 0;
